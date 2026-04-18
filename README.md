@@ -107,6 +107,26 @@ ableton load-drum-kit 0 "Drums/Drum Rack" "drums/acoustic/kit1"
 ableton --host 192.168.1.10 --port 9877 session
 ```
 
+## AI Agent Skills
+
+This repository includes pre-built [Claude Code skills](https://docs.anthropic.com/en/docs/claude-code/skills) in the [`skills/`](skills/) directory. These enable AI agents to control Ableton Live through the CLI.
+
+### Quick Setup
+
+To use the skill in **another project**, copy it into your `.claude/skills/` directory:
+
+```bash
+cp -r /path/to/ableton-cli/skills/ableton-live /your/project/.claude/skills/
+```
+
+Or make it available in **all projects** as a personal skill:
+
+```bash
+cp -r /path/to/ableton-cli/skills/ableton-live ~/.claude/skills/
+```
+
+See [`skills/README.md`](skills/README.md) for more details.
+
 ## License
 
 MIT

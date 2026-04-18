@@ -105,6 +105,26 @@ ableton load-drum-kit 0 "Drums/Drum Rack" "drums/acoustic/kit1"
 ableton --host 192.168.1.10 --port 9877 session
 ```
 
+## AI エージェント向けスキル
+
+[`skills/`](skills/) ディレクトリに [Claude Code スキル](https://docs.anthropic.com/en/docs/claude-code/skills) を同梱しています。AI エージェントが CLI 経由で Ableton Live を操作できるようになります。
+
+### セットアップ
+
+**他のプロジェクト**でスキルを使う場合は `.claude/skills/` にコピーします:
+
+```bash
+cp -r /path/to/ableton-cli/skills/ableton-live /your/project/.claude/skills/
+```
+
+**全プロジェクト共通**のパーソナルスキルとして登録する場合:
+
+```bash
+cp -r /path/to/ableton-cli/skills/ableton-live ~/.claude/skills/
+```
+
+詳細は [`skills/README.md`](skills/README.md) を参照してください。
+
 ## ライセンス
 
 MIT

@@ -60,6 +60,29 @@ ableton --help
 3. Follow the existing pattern: get connection via `_get_conn(ctx)`, call `send_command`, output result.
 4. The corresponding handler must exist in the Ableton Remote Script (`AbletonMCP_Remote_Script/__init__.py`).
 
+## Project Structure
+
+```
+ableton-cli/
+├── ableton_cli/              # CLI source code
+│   ├── __init__.py
+│   ├── connection.py         # TCP socket client
+│   └── main.py               # Click CLI commands
+├── skills/                   # AI agent skills (visible to repo visitors)
+│   ├── README.md             # Skill installation guide
+│   └── ableton-live/
+│       └── SKILL.md          # Claude Code skill definition
+├── .claude/
+│   └── skills/
+│       └── ableton-live/
+│           └── SKILL.md → ../../../skills/ableton-live/SKILL.md
+├── AGENTS.md                 # This file
+├── CLAUDE.md → AGENTS.md
+├── README.md                 # English docs
+├── README.ja.md              # Japanese docs
+└── pyproject.toml
+```
+
 ## Testing
 
 Requires Ableton Live running with the AbletonMCP Remote Script loaded. No automated test suite yet – test manually against a live Ableton session.
