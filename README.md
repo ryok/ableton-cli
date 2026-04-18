@@ -1,12 +1,14 @@
 # ableton-cli
 
-Ableton Live をターミナルから操作する CLI ツール。[AbletonMCP](https://github.com/ahujasid/ableton-mcp) の Remote Script と TCP ソケットで通信します。
+A CLI tool to control Ableton Live from your terminal. Communicates with the [AbletonMCP](https://github.com/ahujasid/ableton-mcp) Remote Script over TCP sockets.
 
-## セットアップ
+[日本語版 README](README.ja.md)
 
-### 1. Ableton Remote Script のインストール
+## Setup
 
-[AbletonMCP](https://github.com/ahujasid/ableton-mcp) の `AbletonMCP_Remote_Script` フォルダを Ableton の MIDI Remote Scripts ディレクトリにコピーします。
+### 1. Install the Ableton Remote Script
+
+Copy the `AbletonMCP_Remote_Script` folder from [AbletonMCP](https://github.com/ahujasid/ableton-mcp) into Ableton's MIDI Remote Scripts directory:
 
 ```
 # macOS
@@ -16,9 +18,9 @@ Ableton Live をターミナルから操作する CLI ツール。[AbletonMCP](h
 ~\Documents\Ableton\User Library\Remote Scripts\AbletonMCP_Remote_Script\
 ```
 
-Ableton Live の設定 → Link, Tempo & MIDI → Control Surface で **AbletonMCP** を選択します。
+In Ableton Live, go to Settings → Link, Tempo & MIDI → Control Surface and select **AbletonMCP**.
 
-### 2. CLI のインストール
+### 2. Install the CLI
 
 ```bash
 git clone https://github.com/ryok/ableton-cli.git
@@ -27,80 +29,84 @@ uv venv && uv pip install -e .
 source .venv/bin/activate
 ```
 
-## 使い方
+## Usage
 
-Ableton Live が起動し、Remote Script がロードされた状態で:
+With Ableton Live running and the Remote Script loaded:
 
 ```bash
-# セッション情報
+# Session info
 ableton session
 
-# テンポ変更
+# Change tempo
 ableton tempo 128
 
-# 再生 / 停止
+# Playback
 ableton play
 ableton stop
 ```
 
-### トラック操作
+### Track Operations
 
 ```bash
-ableton track info 0          # トラック 0 の詳細
-ableton track create           # MIDI トラック作成
-ableton track create -i 2      # インデックス 2 に挿入
-ableton track rename 0 "Bass"  # 名前変更
+ableton track info 0          # Details of track 0
+ableton track create           # Create a MIDI track
+ableton track create -i 2      # Insert at index 2
+ableton track rename 0 "Bass"  # Rename track
 ```
 
-### クリップ操作
+### Clip Operations
 
 ```bash
-# クリップ作成 (トラック 0, スロット 0, 8ビート)
+# Create a clip (track 0, slot 0, 8 beats)
 ableton clip create 0 0 --length 8
 
-# MIDI ノート追加
+# Add MIDI notes
 ableton clip add-notes 0 0 '[
   {"pitch": 60, "start_time": 0, "duration": 1, "velocity": 100},
   {"pitch": 64, "start_time": 1, "duration": 1, "velocity": 80},
   {"pitch": 67, "start_time": 2, "duration": 1, "velocity": 90}
 ]'
 
-# クリップ名変更
+# Rename a clip
 ableton clip rename 0 0 "Chord"
 
-# 再生 / 停止
+# Fire / stop a clip
 ableton clip fire 0 0
 ableton clip stop 0 0
 ```
 
-### ブラウザ
+### Browser
 
 ```bash
-# カテゴリツリー表示
+# Show category tree
 ableton browser tree
 ableton browser tree -c instruments
 
-# 特定パスのアイテム一覧
+# Get details of a single item
+ableton browser get -p "instruments/Synths/Bass"
+ableton browser get -u "query:Synths#Instrument%20Rack:Bass:FileId_5116"
+
+# List items at a path
 ableton browser items "instruments/Synths"
 ```
 
-### インストゥルメント / エフェクト読み込み
+### Loading Instruments / Effects
 
 ```bash
-# URI を指定してロード
+# Load by URI
 ableton load 0 "query:Synths#Instrument%20Rack:Bass:FileId_5116"
 
-# ドラムキットのロード
+# Load a drum kit
 ableton load-drum-kit 0 "Drums/Drum Rack" "drums/acoustic/kit1"
 ```
 
-### 接続オプション
+### Connection Options
 
 ```bash
-# デフォルト: localhost:9877
+# Default: localhost:9877
 ableton --host 192.168.1.10 --port 9877 session
 ```
 
-## ライセンス
+## License
 
 MIT
