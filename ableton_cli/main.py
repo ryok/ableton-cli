@@ -2,6 +2,7 @@
 
 import json
 import sys
+from typing import Any
 
 import click
 
@@ -246,6 +247,30 @@ def _print_tree(item: dict, indent: int = 0) -> None:
     click.echo(line)
     for child in item.get("children", []):
         _print_tree(child, indent + 1)
+
+
+@browser.command("get")
+@click.option("--uri", "-u", default=None, help="URI of the browser item")
+@click.option("--path", "-p", default=None, help="Path to the browser item (e.g. 'instruments/Synths/Bass')")
+@click.pass_context
+def browser_get(ctx: click.Context, uri: str | None, path: str | None) -> None:
+    """Get details of a single browser item by URI or path."""
+    if not uri and not path:
+        click.echo("Error: --uri or --path のどちらかを指定してください", err=True)
+        sys.exit(1)
+    conn = _get_conn(ctx)
+    params: dict[str, Any] = {}
+    if uri:
+        params["uri"] = uri
+    if path:
+        params["path"] = path
+    result = conn.send_command("get_browser_item", params)
+    if result.get("found"):
+        _pp(result.get("item", {}))
+    else:
+        error = result.get("error", "Item not found")
+        click.echo(f"Not found: {error}", err=True)
+        sys.exit(1)
 
 
 @browser.command("items")
