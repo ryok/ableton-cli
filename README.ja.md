@@ -20,12 +20,29 @@ Ableton Live の設定 → Link, Tempo & MIDI → Control Surface で **AbletonM
 
 ### 2. CLI のインストール
 
+**推奨** – 1コマンドでグローバルインストール（[uv](https://docs.astral.sh/uv/) が必要）:
+
+```bash
+uv tool install git+https://github.com/ryok/ableton-cli.git
+```
+
+[pipx](https://pipx.pypa.io/) でも可:
+
+```bash
+pipx install git+https://github.com/ryok/ableton-cli.git
+```
+
+<details>
+<summary>開発用（編集可能インストール）</summary>
+
 ```bash
 git clone https://github.com/ryok/ableton-cli.git
 cd ableton-cli
 uv venv && uv pip install -e .
 source .venv/bin/activate
 ```
+
+</details>
 
 ## 使い方
 

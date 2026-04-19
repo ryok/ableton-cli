@@ -22,12 +22,29 @@ In Ableton Live, go to Settings → Link, Tempo & MIDI → Control Surface and s
 
 ### 2. Install the CLI
 
+**Recommended** – install globally with a single command (requires [uv](https://docs.astral.sh/uv/)):
+
+```bash
+uv tool install git+https://github.com/ryok/ableton-cli.git
+```
+
+Alternatively, using [pipx](https://pipx.pypa.io/):
+
+```bash
+pipx install git+https://github.com/ryok/ableton-cli.git
+```
+
+<details>
+<summary>For development (editable install)</summary>
+
 ```bash
 git clone https://github.com/ryok/ableton-cli.git
 cd ableton-cli
 uv venv && uv pip install -e .
 source .venv/bin/activate
 ```
+
+</details>
 
 ## Usage
 
