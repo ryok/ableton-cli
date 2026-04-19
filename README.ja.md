@@ -2,6 +2,39 @@
 
 Ableton Live をターミナルから操作する CLI ツール。[AbletonMCP](https://github.com/ahujasid/ableton-mcp) の Remote Script と TCP ソケットで通信します。
 
+## なぜ MCP ではなく CLI？
+
+ableton-cli と [Ableton MCP](https://github.com/ahujasid/ableton-mcp) は**同じ Remote Script** をバックエンドに使っています。違いは AI エージェントとの接続方式だけです。
+
+```
+Ableton MCP:   Claude → MCP JSON-RPC → Remote Script (TCP:9877)
+ableton-cli:   Claude → Bash → CLI    → Remote Script (TCP:9877)
+```
+
+### トークン効率の比較
+
+| 観点 | MCP | CLI | 優位 |
+|------|-----|-----|------|
+| **固定コスト** | 17個のツール定義が毎ターン system prompt に含まれる（数千トークン） | Bash ツール1つだけ。コマンドは `--help` やスキルで把握 | **CLI** |
+| **呼び出しコスト** | JSON-RPC のリクエスト/レスポンス（完全なパラメータスキーマ付き） | 短いシェルコマンド + 簡潔なテキスト出力 | **CLI** |
+| **バッチ操作** | 操作ごとに1回のツール呼び出し | `&&` で1回の Bash 呼び出しにチェーン可能 | **CLI** |
+| **型安全性** | JSON Schema によるパラメータ検証あり | スキーマ検証なし | MCP |
+| **発見性** | ツール一覧がモデルに自動公開 | `--help` やスキルが必要 | MCP |
+
+### 例：テンポ設定 + トラック作成 + クリップ再生
+
+```bash
+# MCP: 3回のツール呼び出し（3往復）
+mcp__ableton__set_tempo(bpm=128)
+mcp__ableton__create_midi_track(index=-1)
+mcp__ableton__fire_clip(track_index=0, clip_index=0)
+
+# CLI: 1回の Bash 呼び出し
+ableton tempo 128 && ableton track create && ableton clip fire 0 0
+```
+
+CLI は特に長いセッションでトークン効率が大幅に優れています。MCP のツール定義は毎ターンのコンテキストを消費し続けるためです。
+
 ## セットアップ
 
 ### 1. Ableton Remote Script のインストール
