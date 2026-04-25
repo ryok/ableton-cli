@@ -1,16 +1,16 @@
 # ableton-cli
 
-A CLI tool to control Ableton Live from your terminal. Communicates with the [AbletonMCP](https://github.com/ahujasid/ableton-mcp) Remote Script over TCP sockets.
+A CLI tool to control Ableton Live from your terminal. Communicates with the bundled AbletonMCP Remote Script over TCP sockets.
 
 [日本語版 README](README.ja.md)
 
 ## Why CLI over MCP?
 
-Both ableton-cli and [Ableton MCP](https://github.com/ahujasid/ableton-mcp) use the **same Remote Script** backend — the only difference is how AI agents connect to it.
+ableton-cli uses a bundled Remote Script based on [Ableton MCP](https://github.com/ahujasid/ableton-mcp), with CLI-specific command handlers. The runtime shape is still the same: AI agents issue commands through the CLI, and the CLI talks to Ableton over the Remote Script socket.
 
 ```
-Ableton MCP:   Claude → MCP JSON-RPC → Remote Script (TCP:9877)
-ableton-cli:   Claude → Bash → CLI    → Remote Script (TCP:9877)
+Ableton MCP:   Claude -> MCP JSON-RPC -> Remote Script (TCP:9877)
+ableton-cli:   Claude -> Bash -> CLI    -> bundled Remote Script (TCP:9877)
 ```
 
 ### Token Efficiency
@@ -41,7 +41,7 @@ The CLI approach is significantly more token-efficient, especially in long sessi
 
 ### 1. Install the Ableton Remote Script
 
-Copy the `AbletonMCP_Remote_Script` folder from [AbletonMCP](https://github.com/ahujasid/ableton-mcp) into Ableton's MIDI Remote Scripts directory:
+Clone or download this repository, then copy `remote_scripts/AbletonMCP_Remote_Script` into Ableton's MIDI Remote Scripts directory:
 
 ```
 # macOS
@@ -52,6 +52,8 @@ Copy the `AbletonMCP_Remote_Script` folder from [AbletonMCP](https://github.com/
 ```
 
 In Ableton Live, go to Settings → Link, Tempo & MIDI → Control Surface and select **AbletonMCP**.
+
+This script is based on `ahujasid/ableton-mcp` with ableton-cli-specific changes. See [`remote_scripts/README.md`](remote_scripts/README.md) for the upstream base commit and local changes.
 
 ### 2. Install the CLI
 
@@ -140,11 +142,14 @@ ableton browser get -u "query:Synths#Instrument%20Rack:Bass:FileId_5116"
 ableton browser items "instruments/Synths"
 ```
 
-### Loading Instruments / Effects
+### Loading Browser Items
 
 ```bash
 # Load by URI
 ableton load 0 "query:Synths#Instrument%20Rack:Bass:FileId_5116"
+
+# Load a sample or browser item into a specific Session View slot
+ableton load-slot 2 0 "query:UserLibrary#Samples:auto-dtm:chop_08_outro_vocal.wav"
 
 # Load a drum kit
 ableton load-drum-kit 0 "Drums/Drum Rack" "drums/acoustic/kit1"

@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-ableton-cli is a CLI tool that controls Ableton Live via TCP socket connection to the [AbletonMCP Remote Script](https://github.com/ahujasid/ableton-mcp). Originally ported from an MCP server implementation to a standalone CLI using Click.
+ableton-cli is a CLI tool that controls Ableton Live via TCP socket connection to the bundled AbletonMCP Remote Script. The Remote Script is based on [ahujasid/ableton-mcp](https://github.com/ahujasid/ableton-mcp) with ableton-cli-specific command handlers. Originally ported from an MCP server implementation to a standalone CLI using Click.
 
 ## Architecture
 
@@ -68,6 +68,10 @@ ableton-cli/
 │   ├── __init__.py
 │   ├── connection.py         # TCP socket client
 │   └── main.py               # Click CLI commands
+├── remote_scripts/           # Bundled Ableton Remote Script
+│   ├── README.md             # Upstream base and local changes
+│   └── AbletonMCP_Remote_Script/
+│       └── __init__.py       # Control Surface socket server
 ├── skills/                   # AI agent skills (visible to repo visitors)
 │   ├── README.md             # Skill installation guide
 │   └── ableton-live/
@@ -85,4 +89,4 @@ ableton-cli/
 
 ## Testing
 
-Requires Ableton Live running with the AbletonMCP Remote Script loaded. No automated test suite yet – test manually against a live Ableton session.
+Requires Ableton Live running with the bundled AbletonMCP Remote Script loaded. No automated test suite yet – test manually against a live Ableton session.

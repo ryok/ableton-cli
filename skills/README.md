@@ -40,7 +40,7 @@ cp -r /path/to/ableton-cli/skills/ableton-live ~/.claude/skills/
 ## Requirements
 
 - [ableton-cli](../README.md) installed and in PATH
-- Ableton Live running with the [AbletonMCP Remote Script](https://github.com/ahujasid/ableton-mcp) loaded
+- Ableton Live running with this repository's bundled `remote_scripts/AbletonMCP_Remote_Script` loaded
 
 ## Creating New Skills
 

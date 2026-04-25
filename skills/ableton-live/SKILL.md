@@ -12,7 +12,7 @@ allowed-tools: Bash(ableton:*)
 
 # Ableton Live CLI
 
-Control Ableton Live via the `ableton` CLI. Requires Ableton Live running with the AbletonMCP Remote Script loaded on `localhost:9877`.
+Control Ableton Live via the `ableton` CLI. Requires Ableton Live running with this repository's bundled AbletonMCP Remote Script loaded on `localhost:9877`.
 
 ## Prerequisites
 
@@ -145,6 +145,9 @@ ableton browser items "instruments/Synths"     # Example: list synths
 ```bash
 # Load by URI (get URI from browser commands)
 ableton load <track> "<uri>"
+
+# Load a browser item into a specific Session View clip slot
+ableton load-slot <track> <slot> "<uri>"
 
 # Load drum rack + kit
 ableton load-drum-kit <track> "<rack_uri>" "<kit_path>"

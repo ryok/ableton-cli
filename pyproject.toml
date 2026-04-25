@@ -1,7 +1,7 @@
 [project]
 name = "ableton-cli"
 version = "0.1.0"
-description = "CLI tool to control Ableton Live via the AbletonMCP Remote Script"
+description = "CLI tool to control Ableton Live via a bundled AbletonMCP Remote Script"
 requires-python = ">=3.10"
 license = {text = "MIT"}
 dependencies = [
