@@ -62,6 +62,7 @@ class AbletonConnection:
             "create_clip", "add_notes_to_clip", "set_clip_name",
             "set_tempo", "fire_clip", "stop_clip", "set_device_parameter",
             "start_playback", "stop_playback", "load_browser_item",
+            "load_browser_item_to_slot",
         }
 
         try:

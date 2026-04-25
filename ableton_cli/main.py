@@ -318,6 +318,26 @@ def load_instrument(ctx: click.Context, track_index: int, uri: str) -> None:
         click.echo(f"Failed to load: {uri}", err=True)
 
 
+@cli.command("load-slot")
+@click.argument("track_index", type=int)
+@click.argument("clip_index", type=int)
+@click.argument("uri")
+@click.pass_context
+def load_slot(ctx: click.Context, track_index: int, clip_index: int, uri: str) -> None:
+    """Load a browser item onto a specific Session View clip slot."""
+    conn = _get_conn(ctx)
+    result = conn.send_command("load_browser_item_to_slot", {
+        "track_index": track_index,
+        "clip_index": clip_index,
+        "item_uri": uri,
+    })
+    if result.get("loaded"):
+        item_name = result.get("item_name", uri)
+        click.echo(f"Loaded '{item_name}' on track {track_index}, slot {clip_index}")
+    else:
+        click.echo(f"Failed to load: {uri}", err=True)
+
+
 @cli.command("load-drum-kit")
 @click.argument("track_index", type=int)
 @click.argument("rack_uri")

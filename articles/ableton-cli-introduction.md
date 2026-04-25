@@ -10,7 +10,7 @@ published: false
 
 AI エージェント（Claude Code など）から Ableton Live を操作する方法として、[Ableton MCP](https://github.com/ahujasid/ableton-mcp) が知られています。MCP（Model Context Protocol）はツールを構造的に公開する優れた仕組みですが、**トークン効率**の観点では改善の余地があります。
 
-本記事では、同じバックエンドを使いながらトークン消費を大幅に削減する **[ableton-cli](https://github.com/ryok/ableton-cli)** を紹介します。
+本記事では、Ableton MCP をベースにした Remote Script を CLI から直接扱い、トークン消費を大幅に削減する **[ableton-cli](https://github.com/ryok/ableton-cli)** を紹介します。
 
 ## ableton-cli とは
 
@@ -21,16 +21,16 @@ Ableton Live をターミナルから操作する CLI ツールです。
 ableton tempo 128 && ableton track create && ableton clip fire 0 0
 ```
 
-内部的には Ableton MCP と**同じ Remote Script**（TCP:9877）に接続しています。つまり機能は同一で、AI との接続方式だけが違います。
+内部的には Ableton MCP をベースにした**同梱 Remote Script**（TCP:9877）に接続しています。CLI 用の command handler を追加しているため、このリポジトリに含まれる Remote Script を使います。
 
 ## アーキテクチャ比較
 
 ```
-Ableton MCP:   Claude → MCP JSON-RPC → Remote Script (TCP:9877)
-ableton-cli:   Claude → Bash → CLI    → Remote Script (TCP:9877)
+Ableton MCP:   Claude -> MCP JSON-RPC -> Remote Script (TCP:9877)
+ableton-cli:   Claude -> Bash -> CLI    -> 同梱 Remote Script (TCP:9877)
 ```
 
-重要なのは、バックエンドが共通だということ。Ableton 側で動く Remote Script はまったく同じものです。違いは「Claude がどうやって操作を送るか」だけ。
+重要なのは、Ableton 側で動く socket server という構造は共通で、ableton-cli ではその Remote Script に CLI 用の拡張を加えていることです。
 
 ## なぜ CLI の方がトークン効率が良いのか
 
@@ -85,7 +85,7 @@ ableton clip add-notes 0 0 '[...]' && ableton clip fire 0 0
 
 ### 1. Remote Script（Ableton 側）
 
-[AbletonMCP](https://github.com/ahujasid/ableton-mcp) の `AbletonMCP_Remote_Script` を Ableton の Remote Scripts ディレクトリにコピーします：
+このリポジトリを clone または download して、`remote_scripts/AbletonMCP_Remote_Script` を Ableton の Remote Scripts ディレクトリにコピーします：
 
 ```
 ~/Music/Ableton/User Library/Remote Scripts/AbletonMCP_Remote_Script/
@@ -102,7 +102,7 @@ uv tool install git+https://github.com/ryok/ableton-cli.git
 これだけで `ableton` コマンドがグローバルに使えるようになります。
 
 :::message
-既に Ableton MCP を使っている場合は `.mcp.json` から `ableton-mcp` を削除するだけで切り替え完了。Remote Script は同じなのでそのまま動きます。
+既に Ableton MCP を使っている場合も、このリポジトリ同梱の Remote Script に入れ替えてください。CLI 用の追加 command handler が必要です。
 :::
 
 ## 使い方
@@ -230,11 +230,11 @@ ableton clip fire 0 0
    cp -r /path/to/ableton-cli/skills/ableton-live ~/.claude/skills/
    ```
 
-Remote Script はそのまま。機能は一切失われません。
+Remote Script はこのリポジトリ同梱版へ入れ替えます。CLI 用の追加コマンドも使える状態になります。
 
 ## まとめ
 
-- **ableton-cli** は Ableton MCP と同じ Remote Script を使う、トークン効率重視の CLI ツール
+- **ableton-cli** は Ableton MCP ベースの同梱 Remote Script を使う、トークン効率重視の CLI ツール
 - ツール定義の固定コスト削減、コマンドチェーンによるバッチ実行が主なメリット
 - `uv tool install` で 1 コマンドインストール
 - Claude Code スキルを同梱しており、AI エージェントがすぐに使える
