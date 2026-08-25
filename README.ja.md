@@ -102,7 +102,16 @@ ableton track info 0          # トラック 0 の詳細
 ableton track create           # MIDI トラック作成
 ableton track create -i 2      # インデックス 2 に挿入
 ableton track rename 0 "Bass"  # 名前変更
+ableton track mute 0           # ミュート（--off で解除）
+ableton track solo 0           # ソロ（--off で解除）
+ableton track volume 0 --db -4.6   # 音量を dB で指定（ミキサーの表示値）
+ableton track delete 3         # トラック削除（--yes で確認を省略）
 ```
+
+音量について一点。Live はミキサーのフェーダーを 0-1 のパラメータとして公開して
+いますが、これは非線形カーブ上の値で（0.85 が約 0dB）、dB のセッターはありません。
+`--db` は Live が表示する値を見ながら二分探索して一致させます。生のパラメータを
+直接指定したい場合は `--value` を使ってください。
 
 ### クリップ操作
 
@@ -120,9 +129,27 @@ ableton clip add-notes 0 0 '[
 # クリップ名変更
 ableton clip rename 0 0 "Chord"
 
+# 入ったノートを読み戻して確認する
+ableton clip notes 0 0 --count
+
+# Session クリップを Arrangement の beat 0 へコピー
+ableton clip to-arrangement 0 0 0
+
 # 再生 / 停止
 ableton clip fire 0 0
 ableton clip stop 0 0
+```
+
+ここは Live API の制約が2つ効いています。Arrangement クリップは新規作成できないので、
+まず Session クリップを作って `to-arrangement` で複製します。削除もできませんが、
+既存の領域にクリップを置くと上書きされるので、誤配置は「正しいものを同じ位置に置く」
+ことで直せます。
+
+数百音を超えると `add-notes` はシェルの引数長制限に引っかかります。ファイルから
+読ませてください:
+
+```bash
+ableton clip add-notes 0 0 --file notes.json
 ```
 
 ### ブラウザ
@@ -148,6 +175,9 @@ ableton load 0 "query:Synths#Instrument%20Rack:Bass:FileId_5116"
 
 # サンプルやブラウザ項目を Session View の特定スロットへロード
 ableton load-slot 2 0 "query:UserLibrary#Samples:auto-dtm:chop_08_outro_vocal.wav"
+
+# サンプルやブラウザ項目を Arrangement View の拍位置へロード
+ableton load-arrangement 3 16 "query:UserLibrary#Samples:auto-dtm:chop_10_swing_loop.wav"
 
 # ドラムキットのロード
 ableton load-drum-kit 0 "Drums/Drum Rack" "drums/acoustic/kit1"

@@ -22,6 +22,79 @@ def create_instance(c_instance):
     """Create and return the AbletonMCP script instance"""
     return AbletonMCP(c_instance)
 
+# ── コマンド表（単一の真実源）────────────────────────────────────────
+# ここが唯一の定義。メインスレッドで実行すべきか否かの判定にも、クライアントへ
+# 返す get_command_list にも、同じ集合を使う。以前は Remote Script 側の白リストと
+# ableton_cli/connection.py の is_modifying が別々に存在し、後者への登録漏れで
+# 5 コマンドが待機処理なしのまま出荷された。二度と同期を人手に頼らないための構成。
+
+MODIFYING_COMMANDS = frozenset([
+    "create_midi_track", "set_track_name",
+    "create_clip", "add_notes_to_clip", "set_clip_name",
+    "set_tempo", "fire_clip", "stop_clip",
+    "start_playback", "stop_playback", "load_browser_item",
+    "load_browser_item_to_slot", "load_browser_item_to_arrangement",
+    "set_track_mute", "set_track_solo", "set_track_volume",
+    "delete_track", "duplicate_clip_to_arrangement",
+])
+
+# 状態は変えないが Live のオブジェクトに触るため、やはりメインスレッドが要るもの。
+READ_ON_MAIN_THREAD = frozenset(["get_clip_notes"])
+
+MAIN_THREAD_COMMANDS = MODIFYING_COMMANDS | READ_ON_MAIN_THREAD
+
+
+def parse_display_db(text):
+    """Turn what Live shows on a fader into a number. "-4.6 dB" -> -4.6.
+
+    Kept separate from the Live objects so it can be tested. Two things it has
+    to survive: locales that use a comma decimal separator, and the bottom of
+    the fader, which reads "-inf". Anything unparseable is treated as silence
+    rather than raising, so a display format we have not seen cannot abort a
+    volume change mid-bisection.
+    """
+    s = text.replace("dB", "").strip().replace(",", ".")
+    if s.lower().startswith("-inf") or s.startswith("-\u221e"):
+        return -999.0
+    try:
+        return float(s)
+    except ValueError:
+        return -999.0
+
+
+def solve_for_db(target, lo, hi, as_db, passes=40):
+    """Find the parameter value whose displayed dB is closest to target.
+
+    Live's mixer volume is a 0-1 parameter on a non-linear curve with no dB
+    setter, but the mapping is monotonic, so bisection on the displayed value
+    converges on exactly what the user sees rather than an approximation.
+
+    Returns (value, clamped). clamped is True when target lies outside the
+    fader's range and the search settled on an end stop instead — the caller
+    should report that rather than claim it set the requested level.
+
+    Two details that are easy to get wrong, and did:
+
+    - The loop's invariant is as_db(lo) < target <= as_db(hi), so the value that
+      actually reaches the target is hi, not the midpoint. Live quantises the
+      display to 0.1 dB, and returning (lo + hi) / 2 lands one step low.
+    - Out of range is decided by comparing against the end stops, not by a
+      tolerance on the result. A tolerance the size of the display quantisation
+      flags legitimate hits as clamped whenever rounding falls the wrong way.
+    """
+    if target > as_db(hi):
+        return hi, True
+    if target < as_db(lo):
+        return lo, True
+    for _ in range(passes):
+        mid = (lo + hi) / 2.0
+        if as_db(mid) < target:
+            lo = mid
+        else:
+            hi = mid
+    return hi, False
+
+
 class AbletonMCP(ControlSurface):
     """AbletonMCP Remote Script for Ableton Live"""
     
@@ -226,11 +299,7 @@ class AbletonMCP(ControlSurface):
                 track_index = params.get("track_index", 0)
                 response["result"] = self._get_track_info(track_index)
             # Commands that modify Live's state should be scheduled on the main thread
-            elif command_type in ["create_midi_track", "set_track_name", 
-                                 "create_clip", "add_notes_to_clip", "set_clip_name", 
-                                 "set_tempo", "fire_clip", "stop_clip",
-                                 "start_playback", "stop_playback", "load_browser_item",
-                                 "load_browser_item_to_slot"]:
+            elif command_type in MAIN_THREAD_COMMANDS:
                 # Use a thread-safe approach with a response queue
                 response_queue = queue.Queue()
                 
@@ -288,6 +357,31 @@ class AbletonMCP(ControlSurface):
                             clip_index = params.get("clip_index", 0)
                             item_uri = params.get("item_uri", "")
                             result = self._load_browser_item_to_slot(track_index, clip_index, item_uri)
+                        elif command_type == "set_track_mute":
+                            result = self._set_track_mute(
+                                params.get("track_index", 0), params.get("mute", True))
+                        elif command_type == "set_track_solo":
+                            result = self._set_track_solo(
+                                params.get("track_index", 0), params.get("solo", True))
+                        elif command_type == "set_track_volume":
+                            result = self._set_track_volume(
+                                params.get("track_index", 0), params.get("value", None),
+                                params.get("db", None))
+                        elif command_type == "delete_track":
+                            result = self._delete_track(params.get("track_index", 0))
+                        elif command_type == "duplicate_clip_to_arrangement":
+                            result = self._duplicate_clip_to_arrangement(
+                                params.get("track_index", 0), params.get("clip_index", 0),
+                                params.get("start_time", 0.0))
+                        elif command_type == "get_clip_notes":
+                            result = self._get_clip_notes(
+                                params.get("track_index", 0), params.get("clip_index", 0))
+                        elif command_type == "load_browser_item_to_arrangement":
+                            track_index = params.get("track_index", 0)
+                            start_time = params.get("start_time", 0.0)
+                            item_uri = params.get("item_uri", "")
+                            file_path = params.get("file_path", "")
+                            result = self._load_browser_item_to_arrangement(track_index, start_time, item_uri, file_path)
                         
                         # Put the result in the queue
                         response_queue.put({"status": "success", "result": result})
@@ -314,6 +408,13 @@ class AbletonMCP(ControlSurface):
                 except queue.Empty:
                     response["status"] = "error"
                     response["message"] = "Timeout waiting for operation to complete"
+            elif command_type == "get_command_list":
+                # NOTE: this outer chain assigns response["result"] directly.
+                # The inner, main-thread chain uses a local `result` that is
+                # handed back through the queue. Using the wrong one here fails
+                # silently — the command reports success and returns nothing.
+                response["result"] = {"modifying": sorted(MODIFYING_COMMANDS),
+                                      "main_thread": sorted(MAIN_THREAD_COMMANDS)}
             elif command_type == "get_browser_item":
                 uri = params.get("uri", None)
                 path = params.get("path", None)
@@ -401,6 +502,18 @@ class AbletonMCP(ControlSurface):
                     "class_name": device.class_name,
                     "type": self._get_device_type(device)
                 })
+
+            arrangement_clips = []
+            for clip_index, clip in enumerate(track.arrangement_clips):
+                arrangement_clips.append({
+                    "index": clip_index,
+                    "name": clip.name,
+                    "start_time": clip.start_time,
+                    "end_time": clip.end_time,
+                    "length": clip.length,
+                    "is_audio_clip": getattr(clip, "is_audio_clip", False),
+                    "is_midi_clip": getattr(clip, "is_midi_clip", False)
+                })
             
             result = {
                 "index": track_index,
@@ -413,6 +526,7 @@ class AbletonMCP(ControlSurface):
                 "volume": track.mixer_device.volume.value,
                 "panning": track.mixer_device.panning.value,
                 "clip_slots": clip_slots,
+                "arrangement_clips": arrangement_clips,
                 "devices": devices
             }
             return result
@@ -440,6 +554,111 @@ class AbletonMCP(ControlSurface):
             raise
     
     
+    def _track_at(self, track_index):
+        if track_index < 0 or track_index >= len(self._song.tracks):
+            raise IndexError("Track index out of range")
+        return self._song.tracks[track_index]
+
+    def _set_track_mute(self, track_index, mute):
+        """Mute or unmute a track."""
+        try:
+            track = self._track_at(track_index)
+            track.mute = bool(mute)
+            return {"name": track.name, "mute": track.mute}
+        except Exception as e:
+            self.log_message("Error setting track mute: " + str(e))
+            raise
+
+    def _set_track_solo(self, track_index, solo):
+        """Solo or unsolo a track."""
+        try:
+            track = self._track_at(track_index)
+            track.solo = bool(solo)
+            return {"name": track.name, "solo": track.solo}
+        except Exception as e:
+            self.log_message("Error setting track solo: " + str(e))
+            raise
+
+    def _set_track_volume(self, track_index, value, db):
+        """Set track volume, either as the raw 0-1 parameter or in dB.
+
+        The Live API exposes the mixer volume as a DeviceParameter whose value
+        is 0-1 on a non-linear curve (0.85 is roughly 0 dB); there is no dB
+        setter. But str_for_value() reports the dB the user sees, and the curve
+        is monotonic, so a bisection converges on the exact displayed value.
+        """
+        try:
+            if db is not None and value is not None:
+                raise Exception("Pass either db or value, not both")
+            track = self._track_at(track_index)
+            param = track.mixer_device.volume
+            clamped = False
+            if db is not None:
+                param.value, clamped = solve_for_db(
+                    float(db), param.min, param.max,
+                    lambda v: parse_display_db(param.str_for_value(v)))
+            elif value is not None:
+                param.value = max(param.min, min(param.max, float(value)))
+            return {"name": track.name, "value": param.value,
+                    "display": param.str_for_value(param.value),
+                    "clamped": clamped}
+        except Exception as e:
+            self.log_message("Error setting track volume: " + str(e))
+            raise
+
+    def _delete_track(self, track_index):
+        """Delete a track by index."""
+        try:
+            track = self._track_at(track_index)
+            name = track.name
+            self._song.delete_track(track_index)
+            return {"deleted": name, "track_count": len(self._song.tracks)}
+        except Exception as e:
+            self.log_message("Error deleting track: " + str(e))
+            raise
+
+    def _duplicate_clip_to_arrangement(self, track_index, clip_index, start_time):
+        """Copy a Session clip into the Arrangement at start_time (in beats).
+
+        The Live API cannot create Arrangement clips from scratch; duplicating an
+        existing Session clip is the supported route.
+        """
+        try:
+            track = self._track_at(track_index)
+            if clip_index < 0 or clip_index >= len(track.clip_slots):
+                raise IndexError("Clip index out of range")
+            slot = track.clip_slots[clip_index]
+            if not slot.has_clip:
+                raise Exception("No clip in slot " + str(clip_index))
+            if not hasattr(track, "duplicate_clip_to_arrangement"):
+                raise Exception("This Live version has no duplicate_clip_to_arrangement")
+            track.duplicate_clip_to_arrangement(slot.clip, float(start_time))
+            return {"name": track.name, "clip": slot.clip.name,
+                    "start_time": float(start_time)}
+        except Exception as e:
+            self.log_message("Error duplicating clip to arrangement: " + str(e))
+            raise
+
+    def _get_clip_notes(self, track_index, clip_index):
+        """Read the notes back out of a Session clip, for verification."""
+        try:
+            track = self._track_at(track_index)
+            if clip_index < 0 or clip_index >= len(track.clip_slots):
+                raise IndexError("Clip index out of range")
+            slot = track.clip_slots[clip_index]
+            if not slot.has_clip:
+                raise Exception("No clip in slot " + str(clip_index))
+            clip = slot.clip
+            if not clip.is_midi_clip:
+                raise Exception("Clip is audio, not MIDI - it has no notes")
+            notes = clip.get_notes(0, 0, clip.length, 128)
+            return {"name": clip.name, "length": clip.length,
+                    "notes": [{"pitch": n[0], "start_time": n[1], "duration": n[2],
+                               "velocity": n[3], "mute": n[4]} for n in notes]}
+        except Exception as e:
+            self.log_message("Error reading clip notes: " + str(e))
+            raise
+
     def _set_track_name(self, track_index, name):
         """Set the name of a track"""
         try:
@@ -796,6 +1015,54 @@ class AbletonMCP(ControlSurface):
             return result
         except Exception as e:
             self.log_message("Error loading browser item to slot: {0}".format(str(e)))
+            self.log_message(traceback.format_exc())
+            raise
+
+    def _load_browser_item_to_arrangement(self, track_index, start_time, item_uri="", file_path=""):
+        """Load an audio file or browser item into Arrangement View at the requested beat."""
+        try:
+            if track_index < 0 or track_index >= len(self._song.tracks):
+                raise IndexError("Track index out of range")
+
+            track = self._song.tracks[track_index]
+            app = self.application()
+
+            try:
+                app.view.show_view("Arranger")
+            except Exception:
+                pass
+
+            self._song.view.selected_track = track
+            self._song.current_song_time = float(start_time)
+            before_count = len(track.arrangement_clips)
+
+            item_name = item_uri or file_path
+            if file_path:
+                track.create_audio_clip(file_path, float(start_time))
+                item_name = file_path.split("/")[-1]
+            else:
+                item = self._find_browser_item_by_uri(app.browser, item_uri)
+                if not item:
+                    raise ValueError("Browser item with URI '{0}' not found".format(item_uri))
+                app.browser.load_item(item)
+                item_name = item.name
+
+            after_count = len(track.arrangement_clips)
+            if after_count <= before_count:
+                raise RuntimeError("Arrangement clip was not created")
+
+            result = {
+                "loaded": True,
+                "item_name": item_name,
+                "track_name": track.name,
+                "start_time": float(start_time),
+                "arrangement_clip_count": after_count,
+                "uri": item_uri,
+                "file_path": file_path
+            }
+            return result
+        except Exception as e:
+            self.log_message("Error loading browser item to arrangement: {0}".format(str(e)))
             self.log_message(traceback.format_exc())
             raise
     

@@ -6,6 +6,27 @@ import time
 from typing import Any
 
 
+class AbletonError(RuntimeError):
+    """An error reported by Ableton, as opposed to a bug in this CLI.
+
+    Kept distinct so the CLI can print these as one readable line while letting
+    genuine programming errors surface with their traceback intact.
+    """
+
+
+# Fallback for Remote Scripts too old to answer get_command_list. Newer scripts
+# own the authoritative set; see AbletonConnection._modifying_commands.
+_FALLBACK_MODIFYING = frozenset({
+    "create_midi_track", "create_audio_track", "set_track_name",
+    "create_clip", "add_notes_to_clip", "set_clip_name",
+    "set_tempo", "fire_clip", "stop_clip", "set_device_parameter",
+    "start_playback", "stop_playback", "load_browser_item",
+    "load_browser_item_to_slot", "load_browser_item_to_arrangement",
+    "set_track_mute", "set_track_solo", "set_track_volume",
+    "delete_track", "duplicate_clip_to_arrangement",
+})
+
+
 class AbletonConnection:
     """Manages TCP socket connection to the AbletonMCP Remote Script."""
 
@@ -13,6 +34,7 @@ class AbletonConnection:
         self.host = host
         self.port = port
         self.sock: socket.socket | None = None
+        self._modifying: frozenset[str] | None = None
 
     def connect(self) -> None:
         if self.sock:
@@ -56,14 +78,7 @@ class AbletonConnection:
             self.connect()
 
         command = {"type": command_type, "params": params or {}}
-
-        is_modifying = command_type in {
-            "create_midi_track", "create_audio_track", "set_track_name",
-            "create_clip", "add_notes_to_clip", "set_clip_name",
-            "set_tempo", "fire_clip", "stop_clip", "set_device_parameter",
-            "start_playback", "stop_playback", "load_browser_item",
-            "load_browser_item_to_slot",
-        }
+        is_modifying = command_type in self._modifying_commands()
 
         try:
             assert self.sock is not None
@@ -73,7 +88,7 @@ class AbletonConnection:
             response_data = self._receive_full_response()
             response = json.loads(response_data.decode("utf-8"))
             if response.get("status") == "error":
-                raise RuntimeError(response.get("message", "Unknown error from Ableton"))
+                raise AbletonError(response.get("message", "Unknown error from Ableton"))
             if is_modifying:
                 time.sleep(0.1)
             return response.get("result", {})
@@ -82,4 +97,24 @@ class AbletonConnection:
             raise ConnectionError(f"Lost connection to Ableton: {e}") from e
         except json.JSONDecodeError as e:
             self.sock = None
-            raise RuntimeError(f"Invalid response from Ableton: {e}") from e
+            raise AbletonError(f"Invalid response from Ableton: {e}") from e
+
+    def _modifying_commands(self) -> frozenset[str]:
+        """Which commands mutate Live's state, and so need the settling delays.
+
+        The Remote Script is the authority: it has to know this anyway to decide
+        what runs on the main thread, and keeping a second copy here is what let
+        five commands ship without their delays. Ask it once per process and
+        cache; fall back to the local set when talking to an older script that
+        does not answer.
+        """
+        if self._modifying is None:
+            try:
+                self.sock.sendall(json.dumps(
+                    {"type": "get_command_list", "params": {}}).encode("utf-8"))
+                response = json.loads(self._receive_full_response().decode("utf-8"))
+                names = (response.get("result") or {}).get("modifying")
+                self._modifying = frozenset(names) if names else _FALLBACK_MODIFYING
+            except Exception:
+                self._modifying = _FALLBACK_MODIFYING
+        return self._modifying

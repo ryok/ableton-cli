@@ -104,7 +104,16 @@ ableton track info 0          # Details of track 0
 ableton track create           # Create a MIDI track
 ableton track create -i 2      # Insert at index 2
 ableton track rename 0 "Bass"  # Rename track
+ableton track mute 0           # Mute (--off to unmute)
+ableton track solo 0           # Solo (--off to unsolo)
+ableton track volume 0 --db -4.6   # Set volume in dB, as the mixer displays it
+ableton track delete 3         # Delete a track (--yes to skip the prompt)
 ```
+
+Volume is worth a note: Live exposes the mixer fader as a 0-1 parameter on a
+non-linear curve (0.85 is roughly 0 dB) and offers no dB setter, so `--db`
+bisects on the value Live displays until it matches. Pass `--value` if you want
+to set the raw parameter instead.
 
 ### Clip Operations
 
@@ -122,9 +131,28 @@ ableton clip add-notes 0 0 '[
 # Rename a clip
 ableton clip rename 0 0 "Chord"
 
+# Read the notes back, to check what actually landed
+ableton clip notes 0 0 --count
+
+# Copy a Session clip into the Arrangement at beat 0
+ableton clip to-arrangement 0 0 0
+
 # Fire / stop a clip
 ableton clip fire 0 0
 ableton clip stop 0 0
+```
+
+Two things the Live API forces on you here. Arrangement clips cannot be created
+from scratch, so build a Session clip and duplicate it across with
+`to-arrangement`; and they cannot be deleted either, but placing a clip over an
+occupied range overwrites it, so a misplaced clip is fixed by putting the right
+one in its place.
+
+For anything past a few hundred notes, `add-notes` overflows the shell's
+argument limit. Read them from a file instead:
+
+```bash
+ableton clip add-notes 0 0 --file notes.json
 ```
 
 ### Browser
@@ -150,6 +178,9 @@ ableton load 0 "query:Synths#Instrument%20Rack:Bass:FileId_5116"
 
 # Load a sample or browser item into a specific Session View slot
 ableton load-slot 2 0 "query:UserLibrary#Samples:auto-dtm:chop_08_outro_vocal.wav"
+
+# Load a sample or browser item into Arrangement View at a beat position
+ableton load-arrangement 3 16 "query:UserLibrary#Samples:auto-dtm:chop_10_swing_loop.wav"
 
 # Load a drum kit
 ableton load-drum-kit 0 "Drums/Drum Rack" "drums/acoustic/kit1"
