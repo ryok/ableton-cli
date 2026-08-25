@@ -22,6 +22,79 @@ def create_instance(c_instance):
     """Create and return the AbletonMCP script instance"""
     return AbletonMCP(c_instance)
 
+# ── コマンド表（単一の真実源）────────────────────────────────────────
+# ここが唯一の定義。メインスレッドで実行すべきか否かの判定にも、クライアントへ
+# 返す get_command_list にも、同じ集合を使う。以前は Remote Script 側の白リストと
+# ableton_cli/connection.py の is_modifying が別々に存在し、後者への登録漏れで
+# 5 コマンドが待機処理なしのまま出荷された。二度と同期を人手に頼らないための構成。
+
+MODIFYING_COMMANDS = frozenset([
+    "create_midi_track", "set_track_name",
+    "create_clip", "add_notes_to_clip", "set_clip_name",
+    "set_tempo", "fire_clip", "stop_clip",
+    "start_playback", "stop_playback", "load_browser_item",
+    "load_browser_item_to_slot", "load_browser_item_to_arrangement",
+    "set_track_mute", "set_track_solo", "set_track_volume",
+    "delete_track", "duplicate_clip_to_arrangement",
+])
+
+# 状態は変えないが Live のオブジェクトに触るため、やはりメインスレッドが要るもの。
+READ_ON_MAIN_THREAD = frozenset(["get_clip_notes"])
+
+MAIN_THREAD_COMMANDS = MODIFYING_COMMANDS | READ_ON_MAIN_THREAD
+
+
+def parse_display_db(text):
+    """Turn what Live shows on a fader into a number. "-4.6 dB" -> -4.6.
+
+    Kept separate from the Live objects so it can be tested. Two things it has
+    to survive: locales that use a comma decimal separator, and the bottom of
+    the fader, which reads "-inf". Anything unparseable is treated as silence
+    rather than raising, so a display format we have not seen cannot abort a
+    volume change mid-bisection.
+    """
+    s = text.replace("dB", "").strip().replace(",", ".")
+    if s.lower().startswith("-inf") or s.startswith("-\u221e"):
+        return -999.0
+    try:
+        return float(s)
+    except ValueError:
+        return -999.0
+
+
+def solve_for_db(target, lo, hi, as_db, passes=40):
+    """Find the parameter value whose displayed dB is closest to target.
+
+    Live's mixer volume is a 0-1 parameter on a non-linear curve with no dB
+    setter, but the mapping is monotonic, so bisection on the displayed value
+    converges on exactly what the user sees rather than an approximation.
+
+    Returns (value, clamped). clamped is True when target lies outside the
+    fader's range and the search settled on an end stop instead — the caller
+    should report that rather than claim it set the requested level.
+
+    Two details that are easy to get wrong, and did:
+
+    - The loop's invariant is as_db(lo) < target <= as_db(hi), so the value that
+      actually reaches the target is hi, not the midpoint. Live quantises the
+      display to 0.1 dB, and returning (lo + hi) / 2 lands one step low.
+    - Out of range is decided by comparing against the end stops, not by a
+      tolerance on the result. A tolerance the size of the display quantisation
+      flags legitimate hits as clamped whenever rounding falls the wrong way.
+    """
+    if target > as_db(hi):
+        return hi, True
+    if target < as_db(lo):
+        return lo, True
+    for _ in range(passes):
+        mid = (lo + hi) / 2.0
+        if as_db(mid) < target:
+            lo = mid
+        else:
+            hi = mid
+    return hi, False
+
+
 class AbletonMCP(ControlSurface):
     """AbletonMCP Remote Script for Ableton Live"""
     
@@ -226,14 +299,7 @@ class AbletonMCP(ControlSurface):
                 track_index = params.get("track_index", 0)
                 response["result"] = self._get_track_info(track_index)
             # Commands that modify Live's state should be scheduled on the main thread
-            elif command_type in ["create_midi_track", "set_track_name", 
-                                 "create_clip", "add_notes_to_clip", "set_clip_name", 
-                                 "set_tempo", "fire_clip", "stop_clip",
-                                 "start_playback", "stop_playback", "load_browser_item",
-                                 "load_browser_item_to_slot", "load_browser_item_to_arrangement",
-                                 "set_track_mute", "set_track_solo", "set_track_volume",
-                                 "delete_track", "duplicate_clip_to_arrangement",
-                                 "get_clip_notes"]:
+            elif command_type in MAIN_THREAD_COMMANDS:
                 # Use a thread-safe approach with a response queue
                 response_queue = queue.Queue()
                 
@@ -342,6 +408,9 @@ class AbletonMCP(ControlSurface):
                 except queue.Empty:
                     response["status"] = "error"
                     response["message"] = "Timeout waiting for operation to complete"
+            elif command_type == "get_command_list":
+                result = {"modifying": sorted(MODIFYING_COMMANDS),
+                          "main_thread": sorted(MAIN_THREAD_COMMANDS)}
             elif command_type == "get_browser_item":
                 uri = params.get("uri", None)
                 path = params.get("path", None)
@@ -515,30 +584,20 @@ class AbletonMCP(ControlSurface):
         is monotonic, so a bisection converges on the exact displayed value.
         """
         try:
+            if db is not None and value is not None:
+                raise Exception("Pass either db or value, not both")
             track = self._track_at(track_index)
             param = track.mixer_device.volume
+            clamped = False
             if db is not None:
-                target = float(db)
-                lo, hi = param.min, param.max
-
-                def as_db(v):
-                    s = param.str_for_value(v)
-                    s = s.replace("dB", "").strip()
-                    if s.startswith("-inf") or s.startswith("-Inf"):
-                        return -999.0
-                    return float(s)
-
-                for _ in range(40):
-                    mid = (lo + hi) / 2.0
-                    if as_db(mid) < target:
-                        lo = mid
-                    else:
-                        hi = mid
-                param.value = (lo + hi) / 2.0
+                param.value, clamped = solve_for_db(
+                    float(db), param.min, param.max,
+                    lambda v: parse_display_db(param.str_for_value(v)))
             elif value is not None:
                 param.value = max(param.min, min(param.max, float(value)))
             return {"name": track.name, "value": param.value,
-                    "display": param.str_for_value(param.value)}
+                    "display": param.str_for_value(param.value),
+                    "clamped": clamped}
         except Exception as e:
             self.log_message("Error setting track volume: " + str(e))
             raise
@@ -580,10 +639,14 @@ class AbletonMCP(ControlSurface):
         """Read the notes back out of a Session clip, for verification."""
         try:
             track = self._track_at(track_index)
+            if clip_index < 0 or clip_index >= len(track.clip_slots):
+                raise IndexError("Clip index out of range")
             slot = track.clip_slots[clip_index]
             if not slot.has_clip:
                 raise Exception("No clip in slot " + str(clip_index))
             clip = slot.clip
+            if not clip.is_midi_clip:
+                raise Exception("Clip is audio, not MIDI - it has no notes")
             notes = clip.get_notes(0, 0, clip.length, 128)
             return {"name": clip.name, "length": clip.length,
                     "notes": [{"pitch": n[0], "start_time": n[1], "duration": n[2],

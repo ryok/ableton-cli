@@ -7,7 +7,7 @@ from typing import Any
 
 import click
 
-from ableton_cli.connection import AbletonConnection
+from ableton_cli.connection import AbletonConnection, AbletonError
 
 # ── Shared helpers ──────────────────────────────────────────────────
 
@@ -34,17 +34,20 @@ def _pp(data: dict | list) -> None:
 
 
 class _Cli(click.Group):
-    """Turn Remote Script errors into one readable line instead of a traceback.
+    """Turn Ableton-reported errors into one readable line instead of a traceback.
 
     The most common one is "Unknown command", which means the CLI is newer than
     the AbletonMCP script Live currently has loaded — so say that outright
     rather than making the user read a stack trace to find out.
+
+    Only AbletonError is caught. Bugs in this CLI raise ordinary exceptions and
+    keep their traceback, which is what you want when debugging them.
     """
 
     def invoke(self, ctx: click.Context) -> Any:
         try:
             return super().invoke(ctx)
-        except RuntimeError as e:
+        except AbletonError as e:
             msg = str(e)
             click.echo(f"Error: {msg}", err=True)
             if msg.startswith("Unknown command"):
@@ -186,11 +189,18 @@ def track_volume(ctx: click.Context, index: int, db: float | None, value: float 
     if db is None and value is None:
         click.echo("Error: pass --db or --value", err=True)
         sys.exit(1)
+    if db is not None and value is not None:
+        click.echo("Error: pass --db or --value, not both", err=True)
+        sys.exit(1)
     conn = _get_conn(ctx)
     result = conn.send_command("set_track_volume",
                                {"track_index": index, "db": db, "value": value})
-    click.echo(f"{result.get('name', index)}: {result.get('display')} "
-               f"(value {result.get('value'):.4f})")
+    raw = result.get("value")
+    shown = f"{raw:.4f}" if isinstance(raw, (int, float)) else "?"
+    click.echo(f"{result.get('name', index)}: {result.get('display')} (value {shown})")
+    if result.get("clamped"):
+        click.echo(f"Note: {db} dB is outside this fader's range; "
+                   f"it stopped at {result.get('display')}.", err=True)
 
 
 @track.command("delete")

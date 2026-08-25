@@ -8,6 +8,12 @@ dependencies = [
     "click>=8.0",
 ]
 
+[dependency-groups]
+dev = ["pytest>=8.0"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
 [project.scripts]
 ableton = "ableton_cli.main:cli"
 

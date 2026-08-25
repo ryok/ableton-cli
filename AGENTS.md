@@ -59,17 +59,21 @@ ableton --help
 2. Add the Click command in `main.py` under the appropriate group (`@cli.command()`, `@track.command()`, `@clip.command()`, or `@browser.command()`).
 3. Follow the existing pattern: get connection via `_get_conn(ctx)`, call `send_command`, output result.
 4. The corresponding handler must exist in the Ableton Remote Script (`AbletonMCP_Remote_Script/__init__.py`).
-5. **Register state-modifying commands in the main-thread list.** Adding an
-   `elif command_type == ...` branch to the dispatch is not enough. The branch
-   sits inside a block guarded by an explicit whitelist a little further up:
+5. **Declare the command in `MODIFYING_COMMANDS`** (or `READ_ON_MAIN_THREAD`
+   if it only reads but still touches Live objects), at the top of the Remote
+   Script. Adding an `elif command_type == ...` branch to the dispatch is not
+   enough — the branch sits inside a block guarded by `MAIN_THREAD_COMMANDS`,
+   and anything outside it is handled on the worker thread, where Live's API
+   refuses state changes. A command left out looks like it was never added.
 
-   ```python
-   elif command_type in ["create_midi_track", "set_track_name", ...]:
-   ```
+   That frozenset is the single source of truth. `connection.py` asks for it via
+   `get_command_list` to decide which commands need the 100 ms settling delays,
+   so there is nothing to keep in sync by hand. It does carry a
+   `_FALLBACK_MODIFYING` copy for older scripts that cannot answer, and
+   `tests/test_volume.py` fails if that copy drifts behind.
 
-   Anything not in that list is handled on the worker thread, and Live's API
-   refuses state changes from there. A command left off the list looks like it
-   was never added.
+   This used to be two independent lists, and five commands shipped without
+   their delays because only one of them was updated.
 
 ## Deploying a Remote Script change
 
@@ -140,4 +144,15 @@ ableton-cli/
 
 ## Testing
 
-Requires Ableton Live running with the bundled AbletonMCP Remote Script loaded. No automated test suite yet – test manually against a live Ableton session.
+```bash
+uv run --group dev pytest
+```
+
+`tests/` covers the logic that does not need Live: the volume dB solver, the
+fader-display parser, and the consistency of the command table. The Remote
+Script imports `_Framework` at module level, so the tests load it with that
+stubbed — which is only possible because those helpers were kept free of Live
+objects. Keep new pure logic that way.
+
+Everything else still needs Ableton Live running with the bundled Remote Script
+loaded, tested by hand against a live session.
