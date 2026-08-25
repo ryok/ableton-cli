@@ -149,6 +149,9 @@ ableton load <track> "<uri>"
 # Load a browser item into a specific Session View clip slot
 ableton load-slot <track> <slot> "<uri>"
 
+# Load a browser item into Arrangement View at a beat position
+ableton load-arrangement <track> <start-beat> "<uri>"
+
 # Load drum rack + kit
 ableton load-drum-kit <track> "<rack_uri>" "<kit_path>"
 ```

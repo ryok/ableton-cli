@@ -2,6 +2,7 @@
 
 import json
 import sys
+from pathlib import Path
 from typing import Any
 
 import click
@@ -32,9 +33,33 @@ def _pp(data: dict | list) -> None:
     click.echo(json.dumps(data, indent=2, ensure_ascii=False))
 
 
+class _Cli(click.Group):
+    """Turn Remote Script errors into one readable line instead of a traceback.
+
+    The most common one is "Unknown command", which means the CLI is newer than
+    the AbletonMCP script Live currently has loaded — so say that outright
+    rather than making the user read a stack trace to find out.
+    """
+
+    def invoke(self, ctx: click.Context) -> Any:
+        try:
+            return super().invoke(ctx)
+        except RuntimeError as e:
+            msg = str(e)
+            click.echo(f"Error: {msg}", err=True)
+            if msg.startswith("Unknown command"):
+                click.echo(
+                    "Live is running an older AbletonMCP script. Copy "
+                    "remote_scripts/AbletonMCP_Remote_Script/__init__.py over the "
+                    "installed one, then reload it in Live: Preferences > "
+                    "Link/Tempo/MIDI, set the AbletonMCP Control Surface to None "
+                    "and back. Restarting Live also works.", err=True)
+            sys.exit(1)
+
+
 # ── Root group ──────────────────────────────────────────────────────
 
-@click.group()
+@click.group(cls=_Cli)
 @click.option("--host", default="localhost", help="Ableton Remote Script host")
 @click.option("--port", default=9877, type=int, help="Ableton Remote Script port")
 @click.pass_context
@@ -123,6 +148,65 @@ def track_rename(ctx: click.Context, index: int, name: str) -> None:
     click.echo(f"Track renamed to: {result.get('name', name)}")
 
 
+@track.command("mute")
+@click.argument("index", type=int)
+@click.option("--off", is_flag=True, help="Unmute instead")
+@click.pass_context
+def track_mute(ctx: click.Context, index: int, off: bool) -> None:
+    """Mute (or with --off, unmute) a track at INDEX."""
+    conn = _get_conn(ctx)
+    result = conn.send_command("set_track_mute", {"track_index": index, "mute": not off})
+    state = "muted" if result.get("mute") else "unmuted"
+    click.echo(f"{result.get('name', index)}: {state}")
+
+
+@track.command("solo")
+@click.argument("index", type=int)
+@click.option("--off", is_flag=True, help="Unsolo instead")
+@click.pass_context
+def track_solo(ctx: click.Context, index: int, off: bool) -> None:
+    """Solo (or with --off, unsolo) a track at INDEX."""
+    conn = _get_conn(ctx)
+    result = conn.send_command("set_track_solo", {"track_index": index, "solo": not off})
+    state = "soloed" if result.get("solo") else "unsoloed"
+    click.echo(f"{result.get('name', index)}: {state}")
+
+
+@track.command("volume")
+@click.argument("index", type=int)
+@click.option("--db", type=float, help="Set volume in dB (what the mixer displays)")
+@click.option("--value", type=float, help="Set the raw 0-1 parameter instead")
+@click.pass_context
+def track_volume(ctx: click.Context, index: int, db: float | None, value: float | None) -> None:
+    """Set the volume of the track at INDEX.
+
+    --db is usually what you want: Live's volume parameter is 0-1 on a
+    non-linear curve, so 0.85 means 0 dB and there is no simple conversion.
+    """
+    if db is None and value is None:
+        click.echo("Error: pass --db or --value", err=True)
+        sys.exit(1)
+    conn = _get_conn(ctx)
+    result = conn.send_command("set_track_volume",
+                               {"track_index": index, "db": db, "value": value})
+    click.echo(f"{result.get('name', index)}: {result.get('display')} "
+               f"(value {result.get('value'):.4f})")
+
+
+@track.command("delete")
+@click.argument("index", type=int)
+@click.option("--yes", is_flag=True, help="Skip the confirmation prompt")
+@click.pass_context
+def track_delete(ctx: click.Context, index: int, yes: bool) -> None:
+    """Delete the track at INDEX. This cannot be undone from the CLI."""
+    conn = _get_conn(ctx)
+    if not yes:
+        info = conn.send_command("get_track_info", {"track_index": index})
+        click.confirm(f"Delete track {index} ({info.get('name')})?", abort=True)
+    result = conn.send_command("delete_track", {"track_index": index})
+    click.echo(f"Deleted {result.get('deleted')} ({result.get('track_count')} tracks left)")
+
+
 # ── Clip commands ───────────────────────────────────────────────────
 
 @cli.group()
@@ -163,19 +247,69 @@ def clip_rename(ctx: click.Context, track_index: int, clip_index: int, name: str
     click.echo(f"Clip renamed to: {name}")
 
 
+@clip.command("to-arrangement")
+@click.argument("track_index", type=int)
+@click.argument("clip_index", type=int)
+@click.argument("start_time", type=float)
+@click.pass_context
+def clip_to_arrangement(ctx: click.Context, track_index: int, clip_index: int,
+                        start_time: float) -> None:
+    """Copy a Session clip into the Arrangement at START_TIME (in beats).
+
+    The Live API cannot build Arrangement clips from scratch, so a Session clip
+    has to exist first; this duplicates it across.
+    """
+    conn = _get_conn(ctx)
+    result = conn.send_command("duplicate_clip_to_arrangement", {
+        "track_index": track_index,
+        "clip_index": clip_index,
+        "start_time": start_time,
+    })
+    click.echo(f"{result.get('name')}: '{result.get('clip')}' -> arrangement "
+               f"at beat {result.get('start_time')}")
+
+
+@clip.command("notes")
+@click.argument("track_index", type=int)
+@click.argument("clip_index", type=int)
+@click.option("--count", is_flag=True, help="Print only the note count")
+@click.pass_context
+def clip_notes(ctx: click.Context, track_index: int, clip_index: int, count: bool) -> None:
+    """Read the notes back out of a clip, for verification."""
+    conn = _get_conn(ctx)
+    result = conn.send_command("get_clip_notes",
+                               {"track_index": track_index, "clip_index": clip_index})
+    if count:
+        click.echo(f"{result.get('name')}: {len(result.get('notes', []))} note(s), "
+                   f"{result.get('length')} beats")
+    else:
+        _pp(result)
+
+
 @clip.command("add-notes")
 @click.argument("track_index", type=int)
 @click.argument("clip_index", type=int)
-@click.argument("notes_json")
+@click.argument("notes_json", required=False)
+@click.option("--file", "-f", "notes_file", type=click.Path(exists=True, dir_okay=False),
+              help="Read the note array from a JSON file instead of the argument")
 @click.pass_context
-def clip_add_notes(ctx: click.Context, track_index: int, clip_index: int, notes_json: str) -> None:
+def clip_add_notes(ctx: click.Context, track_index: int, clip_index: int,
+                   notes_json: str | None, notes_file: str | None) -> None:
     """Add MIDI notes to a clip. NOTES_JSON is a JSON array of note objects.
 
     Each note: {"pitch": 60, "start_time": 0.0, "duration": 0.25, "velocity": 100, "mute": false}
 
     Example: ableton clip add-notes 0 0 '[{"pitch":60,"start_time":0,"duration":1,"velocity":100}]'
+
+    Use --file for anything large. A few hundred notes already overflow the
+    shell's argument limit, which otherwise forces callers to chunk by hand.
     """
     conn = _get_conn(ctx)
+    if notes_file:
+        notes_json = Path(notes_file).read_text(encoding="utf-8")
+    elif notes_json is None:
+        click.echo("Error: pass NOTES_JSON or --file", err=True)
+        sys.exit(1)
     try:
         notes = json.loads(notes_json)
     except json.JSONDecodeError as e:
@@ -336,6 +470,34 @@ def load_slot(ctx: click.Context, track_index: int, clip_index: int, uri: str) -
         click.echo(f"Loaded '{item_name}' on track {track_index}, slot {clip_index}")
     else:
         click.echo(f"Failed to load: {uri}", err=True)
+
+
+@cli.command("load-arrangement")
+@click.argument("track_index", type=int)
+@click.argument("start_time", type=float)
+@click.argument("source")
+@click.pass_context
+def load_arrangement(ctx: click.Context, track_index: int, start_time: float, source: str) -> None:
+    """Load an audio file or browser item into Arrangement View at START_TIME in beats."""
+    conn = _get_conn(ctx)
+    params: dict[str, Any] = {
+        "track_index": track_index,
+        "start_time": start_time,
+    }
+    source_path = Path(source).expanduser()
+    if source_path.exists():
+        params["file_path"] = str(source_path.resolve())
+    else:
+        params["item_uri"] = source
+
+    result = conn.send_command("load_browser_item_to_arrangement", {
+        **params,
+    })
+    if result.get("loaded"):
+        item_name = result.get("item_name", source)
+        click.echo(f"Loaded '{item_name}' on track {track_index} at beat {start_time}")
+    else:
+        click.echo(f"Failed to load: {source}", err=True)
 
 
 @cli.command("load-drum-kit")

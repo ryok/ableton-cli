@@ -7,6 +7,7 @@ It is based on [ahujasid/ableton-mcp](https://github.com/ahujasid/ableton-mcp) c
 ## Current Changes From Upstream
 
 - Adds the `load_browser_item_to_slot` command used by `ableton load-slot`.
+- Adds the `load_browser_item_to_arrangement` command used by `ableton load-arrangement`.
 - Expands browser URI lookup to include additional Ableton browser categories such as clips, samples, packs, plugins, user library, and user folders.
 
 Install `AbletonMCP_Remote_Script/` into Ableton's MIDI Remote Scripts directory and select **AbletonMCP** as the Control Surface.
