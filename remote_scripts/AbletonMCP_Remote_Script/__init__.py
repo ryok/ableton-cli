@@ -409,8 +409,12 @@ class AbletonMCP(ControlSurface):
                     response["status"] = "error"
                     response["message"] = "Timeout waiting for operation to complete"
             elif command_type == "get_command_list":
-                result = {"modifying": sorted(MODIFYING_COMMANDS),
-                          "main_thread": sorted(MAIN_THREAD_COMMANDS)}
+                # NOTE: this outer chain assigns response["result"] directly.
+                # The inner, main-thread chain uses a local `result` that is
+                # handed back through the queue. Using the wrong one here fails
+                # silently — the command reports success and returns nothing.
+                response["result"] = {"modifying": sorted(MODIFYING_COMMANDS),
+                                      "main_thread": sorted(MAIN_THREAD_COMMANDS)}
             elif command_type == "get_browser_item":
                 uri = params.get("uri", None)
                 path = params.get("path", None)

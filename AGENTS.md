@@ -75,6 +75,18 @@ ableton --help
    This used to be two independent lists, and five commands shipped without
    their delays because only one of them was updated.
 
+6. **Assign to the right thing.** The dispatch has two chains with different
+   conventions, and mixing them up fails *silently* — the command reports
+   success and returns an empty result, which is harder to notice than an error:
+
+   | Chain | Indent | Assign to |
+   |---|---|---|
+   | outer (no main thread needed) | 12 spaces | `response["result"] = ...` |
+   | inner (`main_thread_task`) | 24 spaces | `result = ...`, returned via the queue |
+
+   `tests/test_dispatch.py` checks every branch in both chains, so this is
+   caught without Live.
+
 ## Deploying a Remote Script change
 
 The Remote Script Live runs is the *installed copy*, not the one in this repo:
