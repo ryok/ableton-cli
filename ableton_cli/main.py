@@ -132,12 +132,19 @@ def track_info(ctx: click.Context, index: int) -> None:
 
 @track.command("create")
 @click.option("--index", "-i", default=-1, type=int, help="Insert position (-1 = end)")
+@click.option("--audio", is_flag=True, help="Create an audio track instead of MIDI")
 @click.pass_context
-def track_create(ctx: click.Context, index: int) -> None:
-    """Create a new MIDI track."""
+def track_create(ctx: click.Context, index: int, audio: bool) -> None:
+    """Create a new track (MIDI by default, or --audio).
+
+    Sample clips (load-arrangement / load-slot) need an audio track; Live
+    refuses to put an audio clip on a MIDI track.
+    """
     conn = _get_conn(ctx)
-    result = conn.send_command("create_midi_track", {"index": index})
-    click.echo(f"Created MIDI track: {result.get('name', '?')} (index {result.get('index', '?')})")
+    command = "create_audio_track" if audio else "create_midi_track"
+    result = conn.send_command(command, {"index": index})
+    kind = "audio" if audio else "MIDI"
+    click.echo(f"Created {kind} track: {result.get('name', '?')} (index {result.get('index', '?')})")
 
 
 @track.command("rename")
