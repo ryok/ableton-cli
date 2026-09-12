@@ -29,7 +29,7 @@ def create_instance(c_instance):
 # 5 コマンドが待機処理なしのまま出荷された。二度と同期を人手に頼らないための構成。
 
 MODIFYING_COMMANDS = frozenset([
-    "create_midi_track", "set_track_name",
+    "create_midi_track", "create_audio_track", "set_track_name",
     "create_clip", "add_notes_to_clip", "set_clip_name",
     "set_tempo", "fire_clip", "stop_clip",
     "start_playback", "stop_playback", "load_browser_item",
@@ -310,6 +310,9 @@ class AbletonMCP(ControlSurface):
                         if command_type == "create_midi_track":
                             index = params.get("index", -1)
                             result = self._create_midi_track(index)
+                        elif command_type == "create_audio_track":
+                            index = params.get("index", -1)
+                            result = self._create_audio_track(index)
                         elif command_type == "set_track_name":
                             track_index = params.get("track_index", 0)
                             name = params.get("name", "")
@@ -539,11 +542,11 @@ class AbletonMCP(ControlSurface):
         try:
             # Create the track
             self._song.create_midi_track(index)
-            
+
             # Get the new track
             new_track_index = len(self._song.tracks) - 1 if index == -1 else index
             new_track = self._song.tracks[new_track_index]
-            
+
             result = {
                 "index": new_track_index,
                 "name": new_track.name
@@ -551,6 +554,28 @@ class AbletonMCP(ControlSurface):
             return result
         except Exception as e:
             self.log_message("Error creating MIDI track: " + str(e))
+            raise
+
+    def _create_audio_track(self, index):
+        """Create a new audio track at the specified index.
+
+        Audio tracks are what sample clips (load_browser_item_to_arrangement /
+        _to_slot) need — Live refuses to put an audio clip on a MIDI track.
+        Mirrors _create_midi_track; only the Live API call differs.
+        """
+        try:
+            self._song.create_audio_track(index)
+
+            new_track_index = len(self._song.tracks) - 1 if index == -1 else index
+            new_track = self._song.tracks[new_track_index]
+
+            result = {
+                "index": new_track_index,
+                "name": new_track.name
+            }
+            return result
+        except Exception as e:
+            self.log_message("Error creating audio track: " + str(e))
             raise
     
     
