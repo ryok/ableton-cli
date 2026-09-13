@@ -248,6 +248,69 @@ def clip_create(ctx: click.Context, track_index: int, clip_index: int, length: f
     click.echo(f"Created clip at track {track_index}, slot {clip_index} ({length} beats)")
 
 
+@clip.command("loop")
+@click.argument("track_index", type=int)
+@click.argument("clip_index", type=int)
+@click.option("--bars", "-b", required=True, type=float, help="Loop length in bars")
+@click.option("--start-bar", default=0.0, type=float, help="Loop start, in bars (default 0)")
+@click.option("--beats-per-bar", default=4.0, type=float, help="Beats per bar (default 4 = 4/4)")
+@click.option("--session", "is_session", is_flag=True,
+              help="Target a Session View clip slot instead of an Arrangement clip")
+@click.option("--off", is_flag=True, help="Turn looping off (still trims markers to the region)")
+@click.pass_context
+def clip_loop(ctx: click.Context, track_index: int, clip_index: int, bars: float,
+              start_bar: float, beats_per_bar: float, is_session: bool, off: bool) -> None:
+    """Loop a clip to a whole number of BARS from START_BAR.
+
+    load-arrangement drops the full sample, whose warped length is rarely an
+    integer number of bars, so layers drift apart. Loop every layer to the
+    same bar count and they stay phase-aligned. Bars are converted to beats
+    with --beats-per-bar (4 = 4/4).
+    """
+    conn = _get_conn(ctx)
+    loop_start = start_bar * beats_per_bar
+    loop_end = (start_bar + bars) * beats_per_bar
+    result = conn.send_command("set_clip_loop", {
+        "track_index": track_index,
+        "clip_index": clip_index,
+        "loop_start": loop_start,
+        "loop_end": loop_end,
+        "looping": not off,
+        "view": "session" if is_session else "arrangement",
+    })
+    ls, le = result.get("loop_start"), result.get("loop_end")
+    state = "looping" if result.get("looping") else "loop off"
+    click.echo(f"{result.get('name', clip_index)}: {state} {ls}-{le} beats "
+               f"({(le - ls) / beats_per_bar:.2f} bars)")
+
+
+@clip.command("warp")
+@click.argument("track_index", type=int)
+@click.argument("clip_index", type=int)
+@click.option("--off", is_flag=True, help="Turn warp off instead of on")
+@click.option("--mode", type=int, default=None,
+              help="Warp mode enum (0=Beats 1=Tones 2=Texture 3=Re-Pitch 4=Complex 6=Complex Pro)")
+@click.option("--session", "is_session", is_flag=True, help="Target a Session View clip slot")
+@click.pass_context
+def clip_warp(ctx: click.Context, track_index: int, clip_index: int, off: bool,
+              mode: int | None, is_session: bool) -> None:
+    """Turn warp on (or --off) for an audio clip.
+
+    Warp must be on for `clip loop --bars` to mean bars on the session grid;
+    an unwarped sample's beats are just seconds.
+    """
+    conn = _get_conn(ctx)
+    result = conn.send_command("set_clip_warp", {
+        "track_index": track_index,
+        "clip_index": clip_index,
+        "warping": not off,
+        "warp_mode": mode,
+        "view": "session" if is_session else "arrangement",
+    })
+    state = "warp on" if result.get("warping") else "warp off"
+    click.echo(f"{result.get('name', clip_index)}: {state} (mode {result.get('warp_mode')})")
+
+
 @clip.command("rename")
 @click.argument("track_index", type=int)
 @click.argument("clip_index", type=int)

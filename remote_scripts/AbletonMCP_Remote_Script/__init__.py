@@ -30,7 +30,8 @@ def create_instance(c_instance):
 
 MODIFYING_COMMANDS = frozenset([
     "create_midi_track", "create_audio_track", "set_track_name",
-    "create_clip", "add_notes_to_clip", "set_clip_name",
+    "create_clip", "add_notes_to_clip", "set_clip_name", "set_clip_loop",
+    "set_clip_warp",
     "set_tempo", "fire_clip", "stop_clip",
     "start_playback", "stop_playback", "load_browser_item",
     "load_browser_item_to_slot", "load_browser_item_to_arrangement",
@@ -332,6 +333,24 @@ class AbletonMCP(ControlSurface):
                             clip_index = params.get("clip_index", 0)
                             name = params.get("name", "")
                             result = self._set_clip_name(track_index, clip_index, name)
+                        elif command_type == "set_clip_loop":
+                            result = self._set_clip_loop(
+                                params.get("track_index", 0),
+                                params.get("clip_index", 0),
+                                params.get("loop_start", 0.0),
+                                params.get("loop_end", 16.0),
+                                params.get("looping", True),
+                                params.get("set_markers", True),
+                                params.get("view", "arrangement"),
+                            )
+                        elif command_type == "set_clip_warp":
+                            result = self._set_clip_warp(
+                                params.get("track_index", 0),
+                                params.get("clip_index", 0),
+                                params.get("warping", True),
+                                params.get("warp_mode", None),
+                                params.get("view", "arrangement"),
+                            )
                         elif command_type == "set_tempo":
                             tempo = params.get("tempo", 120.0)
                             result = self._set_tempo(tempo)
@@ -515,7 +534,11 @@ class AbletonMCP(ControlSurface):
                     "end_time": clip.end_time,
                     "length": clip.length,
                     "is_audio_clip": getattr(clip, "is_audio_clip", False),
-                    "is_midi_clip": getattr(clip, "is_midi_clip", False)
+                    "is_midi_clip": getattr(clip, "is_midi_clip", False),
+                    "warping": getattr(clip, "warping", None),
+                    "looping": getattr(clip, "looping", None),
+                    "loop_start": getattr(clip, "loop_start", None),
+                    "loop_end": getattr(clip, "loop_end", None),
                 })
             
             result = {
@@ -577,12 +600,106 @@ class AbletonMCP(ControlSurface):
         except Exception as e:
             self.log_message("Error creating audio track: " + str(e))
             raise
+
+    def _set_clip_loop(self, track_index, clip_index, loop_start, loop_end,
+                       looping=True, set_markers=True, view="arrangement"):
+        """Set a clip's loop region, in beats.
+
+        Trimming a sample to a whole number of bars is how layers stay
+        phase-aligned: load-arrangement drops the full file, whose warped
+        length is rarely an integer number of bars, so without this the layers
+        drift apart. Loop 0..N*4 on every clip and they realign every N bars.
+
+        Works on arrangement clips (default) or session clips (view="session").
+        """
+        try:
+            clip = self._resolve_clip(track_index, clip_index, view)
+
+            loop_start = float(loop_start)
+            loop_end = float(loop_end)
+            if loop_end <= loop_start:
+                raise ValueError("loop_end must be greater than loop_start")
+
+            # loop_start/loop_end are only writable while the clip is looping.
+            clip.looping = True
+            # Widen the markers first so the loop can move without transiently
+            # crossing a marker, set the loop end before the start (we grow
+            # from the top, loop_start=0 in the common case), then tighten
+            # markers back onto the loop.
+            if set_markers:
+                clip.start_marker = min(loop_start, clip.loop_start)
+                clip.end_marker = max(loop_end, clip.loop_end)
+            clip.loop_end = loop_end
+            clip.loop_start = loop_start
+            if set_markers:
+                clip.start_marker = loop_start
+                clip.end_marker = loop_end
+            clip.looping = bool(looping)
+
+            return {
+                "name": clip.name,
+                "looping": clip.looping,
+                "loop_start": clip.loop_start,
+                "loop_end": clip.loop_end,
+                "start_marker": getattr(clip, "start_marker", None),
+                "end_marker": getattr(clip, "end_marker", None),
+                "length": clip.length,
+            }
+        except Exception as e:
+            self.log_message("Error setting clip loop: " + str(e))
+            raise
+
+    def _set_clip_warp(self, track_index, clip_index, warping,
+                       warp_mode=None, view="arrangement"):
+        """Turn a clip's warp on/off (and optionally set its warp mode).
+
+        Warp must be on for loop_start/loop_end to mean bars on the session
+        grid; an unwarped sample's "beats" are just seconds and its bar
+        boundaries are meaningless. warp_mode is Live's int enum (0=Beats,
+        1=Tones, 2=Texture, 3=Re-Pitch, 4=Complex, 5=REX?, 6=Complex Pro).
+        """
+        try:
+            clip = self._resolve_clip(track_index, clip_index, view)
+            if not getattr(clip, "is_audio_clip", False):
+                raise ValueError("warp only applies to audio clips")
+            clip.warping = bool(warping)
+            if warp_mode is not None and clip.warping:
+                clip.warp_mode = int(warp_mode)
+            return {
+                "name": clip.name,
+                "warping": clip.warping,
+                "warp_mode": getattr(clip, "warp_mode", None),
+                "length": clip.length,
+            }
+        except Exception as e:
+            self.log_message("Error setting clip warp: " + str(e))
+            raise
     
     
     def _track_at(self, track_index):
         if track_index < 0 or track_index >= len(self._song.tracks):
             raise IndexError("Track index out of range")
         return self._song.tracks[track_index]
+
+    def _resolve_clip(self, track_index, clip_index, view):
+        """Return the clip at track/clip index in the given view.
+
+        view="arrangement" reads track.arrangement_clips; "session" reads the
+        clip in track.clip_slots[clip_index]. Raises IndexError when missing.
+        """
+        track = self._track_at(track_index)
+        if view == "session":
+            slots = track.clip_slots
+            if clip_index < 0 or clip_index >= len(slots):
+                raise IndexError("Session clip slot index out of range")
+            slot = slots[clip_index]
+            if not slot.has_clip:
+                raise IndexError("No clip in that session slot")
+            return slot.clip
+        clips = track.arrangement_clips
+        if clip_index < 0 or clip_index >= len(clips):
+            raise IndexError("Arrangement clip index out of range")
+        return clips[clip_index]
 
     def _set_track_mute(self, track_index, mute):
         """Mute or unmute a track."""
