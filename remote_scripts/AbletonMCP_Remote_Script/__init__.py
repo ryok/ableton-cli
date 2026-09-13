@@ -535,7 +535,11 @@ class AbletonMCP(ControlSurface):
                     "length": clip.length,
                     "is_audio_clip": getattr(clip, "is_audio_clip", False),
                     "is_midi_clip": getattr(clip, "is_midi_clip", False),
-                    "warping": getattr(clip, "warping", None),
+                    # warping is audio-only: reading it on a MIDI clip *raises*
+                    # (not AttributeError), so getattr's default will not catch
+                    # it. Gate on is_audio_clip. looping/loop_* are valid for both.
+                    "warping": (clip.warping
+                                if getattr(clip, "is_audio_clip", False) else None),
                     "looping": getattr(clip, "looping", None),
                     "loop_start": getattr(clip, "loop_start", None),
                     "loop_end": getattr(clip, "loop_end", None),
