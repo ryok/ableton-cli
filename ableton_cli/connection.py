@@ -18,7 +18,8 @@ class AbletonError(RuntimeError):
 # own the authoritative set; see AbletonConnection._modifying_commands.
 _FALLBACK_MODIFYING = frozenset({
     "create_midi_track", "create_audio_track", "set_track_name",
-    "create_clip", "add_notes_to_clip", "set_clip_name",
+    "create_clip", "add_notes_to_clip", "set_clip_name", "set_clip_loop",
+    "set_clip_warp",
     "set_tempo", "fire_clip", "stop_clip", "set_device_parameter",
     "start_playback", "stop_playback", "load_browser_item",
     "load_browser_item_to_slot", "load_browser_item_to_arrangement",
