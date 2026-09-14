@@ -1095,12 +1095,19 @@ class AbletonMCP(ControlSurface):
     
     
     def _load_browser_item(self, track_index, item_uri):
-        """Load a browser item onto a track by its URI"""
+        """Load a browser item onto a track by its URI.
+
+        track_index == -1 targets the master track, so whole-mix processing
+        (glue, tape, vinyl) can be loaded there. The master cannot hold
+        instruments — Live silently ignores those — but audio effects load.
+        """
         try:
-            if track_index < 0 or track_index >= len(self._song.tracks):
+            if track_index == -1:
+                track = self._song.master_track
+            elif 0 <= track_index < len(self._song.tracks):
+                track = self._song.tracks[track_index]
+            else:
                 raise IndexError("Track index out of range")
-            
-            track = self._song.tracks[track_index]
             
             # Access the application's browser instance instead of creating a new one
             app = self.application()
