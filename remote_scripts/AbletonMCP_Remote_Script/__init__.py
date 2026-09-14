@@ -37,10 +37,11 @@ MODIFYING_COMMANDS = frozenset([
     "load_browser_item_to_slot", "load_browser_item_to_arrangement",
     "set_track_mute", "set_track_solo", "set_track_volume",
     "delete_track", "duplicate_clip_to_arrangement",
+    "set_device_parameter", "delete_device",
 ])
 
 # 状態は変えないが Live のオブジェクトに触るため、やはりメインスレッドが要るもの。
-READ_ON_MAIN_THREAD = frozenset(["get_clip_notes"])
+READ_ON_MAIN_THREAD = frozenset(["get_clip_notes", "get_device_parameters"])
 
 MAIN_THREAD_COMMANDS = MODIFYING_COMMANDS | READ_ON_MAIN_THREAD
 
@@ -350,6 +351,23 @@ class AbletonMCP(ControlSurface):
                                 params.get("warping", True),
                                 params.get("warp_mode", None),
                                 params.get("view", "arrangement"),
+                            )
+                        elif command_type == "get_device_parameters":
+                            result = self._get_device_parameters(
+                                params.get("track_index", 0),
+                                params.get("device_index", 0),
+                            )
+                        elif command_type == "set_device_parameter":
+                            result = self._set_device_parameter(
+                                params.get("track_index", 0),
+                                params.get("device_index", 0),
+                                params.get("parameter"),
+                                params.get("value"),
+                            )
+                        elif command_type == "delete_device":
+                            result = self._delete_device(
+                                params.get("track_index", 0),
+                                params.get("device_index", 0),
                             )
                         elif command_type == "set_tempo":
                             tempo = params.get("tempo", 120.0)
@@ -684,6 +702,94 @@ class AbletonMCP(ControlSurface):
         if track_index < 0 or track_index >= len(self._song.tracks):
             raise IndexError("Track index out of range")
         return self._song.tracks[track_index]
+
+    def _track_or_master(self, track_index):
+        """Like _track_at, but track_index == -1 means the master track.
+
+        Whole-mix processing (glue/tape/vinyl) lives on the master, so the
+        device commands need to reach it the same way load-master does.
+        """
+        if track_index == -1:
+            return self._song.master_track
+        return self._track_at(track_index)
+
+    def _resolve_device(self, track_index, device_index):
+        track = self._track_or_master(track_index)
+        devices = track.devices
+        if device_index < 0 or device_index >= len(devices):
+            raise IndexError("Device index out of range (track has %d)" % len(devices))
+        return track, devices[device_index]
+
+    def _get_device_parameters(self, track_index, device_index):
+        """List a device's parameters with their current and allowed values.
+
+        The agent cannot hear, so it reads this to know what to turn and to
+        confirm a change. Each parameter reports index, name, value, min, max
+        and a human-readable display string.
+        """
+        try:
+            track, device = self._resolve_device(track_index, device_index)
+            params = []
+            for i, p in enumerate(device.parameters):
+                try:
+                    disp = p.str_for_value(p.value)
+                except Exception:
+                    disp = str(p.value)
+                params.append({
+                    "index": i, "name": p.name, "value": p.value,
+                    "min": p.min, "max": p.max, "display": disp,
+                })
+            return {"track": track.name, "device": device.name, "parameters": params}
+        except Exception as e:
+            self.log_message("Error reading device parameters: " + str(e))
+            raise
+
+    def _set_device_parameter(self, track_index, device_index, parameter, value):
+        """Set one device parameter to value. `parameter` is its index (int)
+        or its name (str). The value is clamped to the parameter's range."""
+        try:
+            track, device = self._resolve_device(track_index, device_index)
+            target = None
+            if isinstance(parameter, int) or (isinstance(parameter, str) and parameter.isdigit()):
+                idx = int(parameter)
+                if idx < 0 or idx >= len(device.parameters):
+                    raise IndexError("Parameter index out of range")
+                target = device.parameters[idx]
+            else:
+                for p in device.parameters:
+                    if p.name == parameter:
+                        target = p
+                        break
+                if target is None:
+                    raise ValueError("No parameter named '%s'" % parameter)
+            if value is None:
+                raise ValueError("value is required")
+            v = max(target.min, min(target.max, float(value)))
+            target.value = v
+            try:
+                disp = target.str_for_value(target.value)
+            except Exception:
+                disp = str(target.value)
+            return {"track": track.name, "device": device.name,
+                    "parameter": target.name, "value": target.value,
+                    "display": disp, "clamped": v != float(value)}
+        except Exception as e:
+            self.log_message("Error setting device parameter: " + str(e))
+            raise
+
+    def _delete_device(self, track_index, device_index):
+        """Remove a device from a track's (or the master's) chain."""
+        try:
+            track = self._track_or_master(track_index)
+            if device_index < 0 or device_index >= len(track.devices):
+                raise IndexError("Device index out of range")
+            name = track.devices[device_index].name
+            track.delete_device(device_index)
+            return {"track": track.name, "deleted": name,
+                    "device_count": len(track.devices)}
+        except Exception as e:
+            self.log_message("Error deleting device: " + str(e))
+            raise
 
     def _resolve_clip(self, track_index, clip_index, view):
         """Return the clip at track/clip index in the given view.
@@ -1099,7 +1205,7 @@ class AbletonMCP(ControlSurface):
         try:
             if track_index < 0 or track_index >= len(self._song.tracks):
                 raise IndexError("Track index out of range")
-            
+
             track = self._song.tracks[track_index]
             
             # Access the application's browser instance instead of creating a new one

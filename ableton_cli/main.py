@@ -528,8 +528,77 @@ def load_instrument(ctx: click.Context, track_index: int, uri: str) -> None:
     })
     if result.get("loaded"):
         click.echo(f"Loaded '{result.get('item_name', uri)}' on track {track_index}")
-    else:
-        click.echo(f"Failed to load: {uri}", err=True)
+
+
+# ── Device commands ─────────────────────────────────────────────────
+
+def _track_arg(value: str) -> int:
+    """A track argument: an integer index, or 'master'/'m' for the master (-1)."""
+    if value.lower() in ("master", "m"):
+        return -1
+    try:
+        return int(value)
+    except ValueError:
+        raise click.BadParameter("TRACK must be an integer index or 'master'")
+
+
+@cli.group()
+def device() -> None:
+    """Device operations (params, set, delete). TRACK may be 'master'."""
+    pass
+
+
+@device.command("params")
+@click.argument("track")
+@click.argument("device_index", type=int)
+@click.pass_context
+def device_params(ctx: click.Context, track: str, device_index: int) -> None:
+    """List a device's parameters (index, name, value, range).
+
+    Read this to know what to turn, and to confirm a change afterwards.
+    """
+    conn = _get_conn(ctx)
+    result = conn.send_command("get_device_parameters", {
+        "track_index": _track_arg(track), "device_index": device_index})
+    click.echo(f"{result.get('track')} / {result.get('device')}:")
+    for p in result.get("parameters", []):
+        click.echo(f"  [{p['index']:>2}] {p['name']}: {p['display']} "
+                   f"(value {p['value']:.3f}, range {p['min']:.2f}..{p['max']:.2f})")
+
+
+@device.command("set")
+@click.argument("track")
+@click.argument("device_index", type=int)
+@click.argument("parameter")
+@click.argument("value", type=float)
+@click.pass_context
+def device_set(ctx: click.Context, track: str, device_index: int,
+               parameter: str, value: float) -> None:
+    """Set a device PARAMETER (its index or name) to VALUE.
+
+    Value is clamped to the parameter's range. Quote names with spaces.
+    """
+    conn = _get_conn(ctx)
+    result = conn.send_command("set_device_parameter", {
+        "track_index": _track_arg(track), "device_index": device_index,
+        "parameter": parameter, "value": value})
+    click.echo(f"{result.get('device')} / {result.get('parameter')}: "
+               f"{result.get('display')} (value {result.get('value'):.3f})")
+    if result.get("clamped"):
+        click.echo("Note: value was clamped to the parameter's range.", err=True)
+
+
+@device.command("delete")
+@click.argument("track")
+@click.argument("device_index", type=int)
+@click.pass_context
+def device_delete(ctx: click.Context, track: str, device_index: int) -> None:
+    """Delete the device at DEVICE_INDEX from TRACK's chain."""
+    conn = _get_conn(ctx)
+    result = conn.send_command("delete_device", {
+        "track_index": _track_arg(track), "device_index": device_index})
+    click.echo(f"Deleted {result.get('deleted')} "
+               f"({result.get('device_count')} left on {result.get('track')})")
 
 
 @cli.command("load-slot")
