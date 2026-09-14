@@ -601,6 +601,26 @@ def device_delete(ctx: click.Context, track: str, device_index: int) -> None:
                f"({result.get('device_count')} left on {result.get('track')})")
 
 
+@cli.command("load-master")
+@click.argument("uri")
+@click.pass_context
+def load_master(ctx: click.Context, uri: str) -> None:
+    """Load an audio effect onto the master track (whole-mix processing).
+
+    For glue/tape/vinyl across the whole mix. The master takes audio effects
+    only — instruments are ignored by Live.
+    """
+    conn = _get_conn(ctx)
+    result = conn.send_command("load_browser_item", {
+        "track_index": -1,
+        "item_uri": uri,
+    })
+    if result.get("loaded"):
+        click.echo(f"Loaded '{result.get('item_name', uri)}' on master")
+    else:
+        click.echo(f"Failed to load: {uri}", err=True)
+
+
 @cli.command("load-slot")
 @click.argument("track_index", type=int)
 @click.argument("clip_index", type=int)
