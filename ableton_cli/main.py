@@ -566,7 +566,7 @@ def device_params(ctx: click.Context, track: str, device_index: int) -> None:
                    f"(value {p['value']:.3f}, range {p['min']:.2f}..{p['max']:.2f})")
 
 
-@device.command("set")
+@device.command("set", context_settings={"ignore_unknown_options": True})
 @click.argument("track")
 @click.argument("device_index", type=int)
 @click.argument("parameter")
