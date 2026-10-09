@@ -311,6 +311,57 @@ def clip_warp(ctx: click.Context, track_index: int, clip_index: int, off: bool,
     click.echo(f"{result.get('name', clip_index)}: {state} (mode {result.get('warp_mode')})")
 
 
+@clip.command("warp-tempo")
+@click.argument("track_index", type=int)
+@click.argument("clip_index", type=int)
+@click.argument("bpm", type=float)
+@click.option("--offset", "offset_s", default=0.0, type=float,
+              help="Seconds into the sample that land on the clip's beat 0 (default 0)")
+@click.option("--anchor-beat", type=float, default=None,
+              help="Beat of the second marker (default: the clip's loop end)")
+@click.option("--session", "is_session", is_flag=True, help="Target a Session View clip slot")
+@click.pass_context
+def clip_warp_tempo(ctx: click.Context, track_index: int, clip_index: int, bpm: float,
+                    offset_s: float, anchor_beat: float | None, is_session: bool) -> None:
+    """Tell Live the tempo a sample was actually played at.
+
+    Auto-warp often assigns a loop the project tempo instead of its own. A
+    100 BPM loop read as 99 BPM runs 0.32 beat ahead after 8 bars: its snare
+    rushes and snaps back every time the loop wraps. This replaces the clip's
+    warp markers with beat 0 -> OFFSET s and a constant BPM from there (the
+    clip-view "Seg. BPM", set exactly).
+    """
+    conn = _get_conn(ctx)
+    result = conn.send_command("set_clip_warp_tempo", {
+        "track_index": track_index,
+        "clip_index": clip_index,
+        "bpm": bpm,
+        "offset_s": offset_s,
+        "anchor_beat": anchor_beat,
+        "view": "session" if is_session else "arrangement",
+    })
+    after = result.get("after", [])
+    pts = ", ".join(f"{m['beat_time']:.4g}b@{m['sample_time']:.4f}s" for m in after)
+    click.echo(f"{result.get('name', clip_index)}: {bpm:g} BPM from {offset_s:g}s  [{pts}]")
+
+
+@clip.command("warp-markers")
+@click.argument("track_index", type=int)
+@click.argument("clip_index", type=int)
+@click.option("--session", "is_session", is_flag=True, help="Target a Session View clip slot")
+@click.pass_context
+def clip_warp_markers(ctx: click.Context, track_index: int, clip_index: int,
+                      is_session: bool) -> None:
+    """Show an audio clip's warp markers and the BPM of each segment (JSON)."""
+    conn = _get_conn(ctx)
+    result = conn.send_command("get_clip_warp_markers", {
+        "track_index": track_index,
+        "clip_index": clip_index,
+        "view": "session" if is_session else "arrangement",
+    })
+    click.echo(json.dumps(result, indent=2))
+
+
 @clip.command("rename")
 @click.argument("track_index", type=int)
 @click.argument("clip_index", type=int)

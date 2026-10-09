@@ -124,6 +124,13 @@ Live's log, useful for confirming what actually loaded:
   non-linear curve (0.85 is roughly 0 dB). `str_for_value()` reports the dB the
   user sees and the curve is monotonic, so `set_track_volume` bisects to hit an
   exact displayed value.
+- **Auto-warp often assigns a loop the project tempo, not its own.** A 100 BPM
+  loop read as 99 BPM drifts 0.32 beat per 8 bars. `clip warp-tempo` rewrites
+  the markers to (0, offset) + (loop end, offset + beats*60/bpm). Live always
+  keeps a *shadow marker* 1/32 beat after the last real one: it is listed in
+  `clip.warp_markers` but `remove_warp_marker` refuses it ("The shadow marker
+  can't be deleted"), and Live leaves no rollback if a call fails midway – skip
+  it, and make marker edits safe to re-run.
 - **`clip add-notes` via argv overflows the shell** at a few hundred notes. Use
   `--file`.
 
