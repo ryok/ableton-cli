@@ -31,7 +31,7 @@ def create_instance(c_instance):
 MODIFYING_COMMANDS = frozenset([
     "create_midi_track", "create_audio_track", "set_track_name",
     "create_clip", "add_notes_to_clip", "set_clip_name", "set_clip_loop",
-    "set_clip_warp",
+    "set_clip_warp", "set_clip_warp_tempo",
     "set_tempo", "fire_clip", "stop_clip",
     "start_playback", "stop_playback", "load_browser_item",
     "load_browser_item_to_slot", "load_browser_item_to_arrangement",
@@ -41,7 +41,8 @@ MODIFYING_COMMANDS = frozenset([
 ])
 
 # 状態は変えないが Live のオブジェクトに触るため、やはりメインスレッドが要るもの。
-READ_ON_MAIN_THREAD = frozenset(["get_clip_notes", "get_device_parameters"])
+READ_ON_MAIN_THREAD = frozenset(["get_clip_notes", "get_device_parameters",
+                                 "get_clip_warp_markers"])
 
 MAIN_THREAD_COMMANDS = MODIFYING_COMMANDS | READ_ON_MAIN_THREAD
 
@@ -350,6 +351,21 @@ class AbletonMCP(ControlSurface):
                                 params.get("clip_index", 0),
                                 params.get("warping", True),
                                 params.get("warp_mode", None),
+                                params.get("view", "arrangement"),
+                            )
+                        elif command_type == "set_clip_warp_tempo":
+                            result = self._set_clip_warp_tempo(
+                                params.get("track_index", 0),
+                                params.get("clip_index", 0),
+                                params.get("bpm"),
+                                params.get("offset_s", 0.0),
+                                params.get("anchor_beat", None),
+                                params.get("view", "arrangement"),
+                            )
+                        elif command_type == "get_clip_warp_markers":
+                            result = self._get_clip_warp_markers(
+                                params.get("track_index", 0),
+                                params.get("clip_index", 0),
                                 params.get("view", "arrangement"),
                             )
                         elif command_type == "get_device_parameters":
@@ -698,6 +714,92 @@ class AbletonMCP(ControlSurface):
             raise
     
     
+    @staticmethod
+    def _warp_markers_of(clip):
+        return [{"beat_time": m.beat_time, "sample_time": m.sample_time}
+                for m in clip.warp_markers]
+
+    def _get_clip_warp_markers(self, track_index, clip_index, view="arrangement"):
+        """Read an audio clip's warp markers (beat_time <-> sample_time in seconds)."""
+        clip = self._resolve_clip(track_index, clip_index, view)
+        if not getattr(clip, "is_audio_clip", False):
+            raise ValueError("warp markers only exist on audio clips")
+        markers = self._warp_markers_of(clip)
+        segs = []
+        for a, b in zip(markers, markers[1:]):
+            ds = b["sample_time"] - a["sample_time"]
+            segs.append(60.0 * (b["beat_time"] - a["beat_time"]) / ds if ds > 0 else None)
+        return {"name": clip.name, "warping": clip.warping,
+                "markers": markers, "segment_bpm": segs}
+
+    def _set_clip_warp_tempo(self, track_index, clip_index, bpm, offset_s=0.0,
+                             anchor_beat=None, view="arrangement"):
+        """Declare the sample's true tempo: beat 0 <-> offset_s, constant bpm after.
+
+        Live's auto-warp often assigns a loop the *project* tempo instead of the
+        tempo it was played at. A 100 BPM loop read as 99 BPM runs 0.32 beat
+        ahead after 8 bars, so a snare in it rushes and snaps back every loop.
+        This replaces every marker with two: (0, offset_s) and
+        (anchor_beat, offset_s + anchor_beat * 60 / bpm). Live extends the last
+        segment's tempo past the final marker, so the whole clip plays at bpm.
+
+        anchor_beat defaults to the clip's loop_end (clamped to the sample).
+        """
+        import Live
+        clip = self._resolve_clip(track_index, clip_index, view)
+        if not getattr(clip, "is_audio_clip", False):
+            raise ValueError("warp tempo only applies to audio clips")
+        bpm = float(bpm)
+        offset_s = float(offset_s or 0.0)
+        if bpm <= 0:
+            raise ValueError("bpm must be positive")
+        if offset_s < 0:
+            raise ValueError("offset_s must be >= 0 (the marker must sit inside the sample)")
+        clip.warping = True
+        sample_len_s = clip.sample_length / float(clip.sample_rate)
+        anchor = float(anchor_beat) if anchor_beat is not None else float(clip.loop_end)
+        max_beat = (sample_len_s - offset_s) * bpm / 60.0
+        anchor = min(anchor, max_beat * 0.999)
+        if anchor <= 0:
+            raise ValueError("anchor beat falls outside the sample")
+        before = self._warp_markers_of(clip)
+
+        def add(beat, sec):
+            # Live 11+ takes a Live.Clip.WarpMarker; keep a dict fallback in case
+            # a build rejects the keyword constructor.
+            try:
+                marker = Live.Clip.WarpMarker(sample_time=sec, beat_time=beat)
+            except Exception:
+                marker = {"sample_time": sec, "beat_time": beat}
+            clip.add_warp_marker(marker)
+
+        # Add the far anchor first so the clip never drops to zero markers, then
+        # clear everything else and re-seat beat 0 at the offset.
+        #
+        # warp_markers also lists Live's *shadow marker*: an automatic one 1/32
+        # beat after the last real marker, which carries the tempo past the end.
+        # Removing it raises "The shadow marker can't be deleted", and the first
+        # version of this died there with beat 0 already gone. It is always the
+        # last entry, and it follows the far anchor on its own, so leave it.
+        far = (anchor, offset_s + anchor * 60.0 / bpm)
+        # Re-running on a clip that already has this anchor must not try to add
+        # a second marker on the same beat.
+        existing = [m for m in clip.warp_markers if abs(m.beat_time - far[0]) <= 1e-6]
+        if not existing:
+            add(*far)
+        elif abs(existing[0].sample_time - far[1]) > 1e-6:
+            clip.remove_warp_marker(existing[0].beat_time)
+            add(*far)
+        current = list(clip.warp_markers)
+        for m in current[:-1]:
+            if abs(m.beat_time - far[0]) > 1e-6:
+                clip.remove_warp_marker(m.beat_time)
+        add(0.0, offset_s)
+
+        after = self._warp_markers_of(clip)
+        return {"name": clip.name, "bpm": bpm, "offset_s": offset_s,
+                "anchor_beat": anchor, "before": before, "after": after}
+
     def _track_at(self, track_index):
         if track_index < 0 or track_index >= len(self._song.tracks):
             raise IndexError("Track index out of range")
