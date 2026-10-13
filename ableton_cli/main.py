@@ -55,9 +55,9 @@ class _Cli(click.Group):
                 click.echo(
                     "Live is running an older AbletonMCP script. Copy "
                     "remote_scripts/AbletonMCP_Remote_Script/__init__.py over the "
-                    "installed one, then reload it in Live: Preferences > "
-                    "Link/Tempo/MIDI, set the AbletonMCP Control Surface to None "
-                    "and back. Restarting Live also works.", err=True)
+                    "installed one, delete its __pycache__, then quit and reopen "
+                    "Live. Toggling the Control Surface is not enough: Python "
+                    "keeps serving the old module.", err=True)
             sys.exit(1)
 
 
