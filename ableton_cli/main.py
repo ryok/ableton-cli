@@ -2,6 +2,7 @@
 
 import json
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
@@ -566,6 +567,79 @@ def browser_items(ctx: click.Context, path: str) -> None:
 
 # ── Load commands ───────────────────────────────────────────────────
 
+def _load_snapshot(conn: AbletonConnection, track_index: int) -> tuple[int, list[str] | None]:
+    """Track count, and the target track's device names (None for the master)."""
+    count = conn.send_command("get_session_info").get("track_count", 0)
+    if track_index < 0:
+        return count, None
+    info = conn.send_command("get_track_info", {"track_index": track_index})
+    return count, [d.get("name", "") for d in info.get("devices", [])]
+
+
+def _find_stray_track(conn: AbletonConnection, after: int,
+                      device_name: str) -> int | None:
+    """The track Live created for the item: holds the device and no clips yet."""
+    for index in range(after - 1, -1, -1):
+        info = conn.send_command("get_track_info", {"track_index": index})
+        names = [d.get("name", "") for d in info.get("devices", [])]
+        empty = (not info.get("arrangement_clips")
+                 and not any(s.get("has_clip") for s in info.get("clip_slots", [])))
+        if device_name in names and empty:
+            return index
+    return None
+
+
+def _load_verified(conn: AbletonConnection, track_index: int, uri: str) -> None:
+    """Load a browser item onto a track and check that it actually landed there.
+
+    Live's browser.load_item() targets whatever it considers the current
+    insertion point, and "loaded": true only means the call didn't raise. In
+    practice an instrument preset has landed on a brand-new track while the
+    target kept its old instrument, and the command still printed "Loaded".
+    So compare the track count and the target's devices before and after, and
+    exit 1 on either failure instead of letting the caller believe it worked.
+    """
+    where = "master" if track_index < 0 else f"track {track_index}"
+    before_count, before_devices = _load_snapshot(conn, track_index)
+    result = conn.send_command("load_browser_item", {
+        "track_index": track_index,
+        "item_uri": uri,
+    })
+    if not result.get("loaded"):
+        click.echo(f"Failed to load: {uri}", err=True)
+        sys.exit(1)
+    item_name = result.get("item_name", uri)
+    device_name = Path(item_name).stem  # "Basic Saw Pad.adg" -> "Basic Saw Pad"
+
+    # The load is normally visible at once; poll briefly in case Live lags.
+    deadline = time.monotonic() + 2.0
+    while True:
+        count, devices = _load_snapshot(conn, track_index)
+        settled = count != before_count or devices != before_devices
+        if settled or time.monotonic() > deadline:
+            break
+        time.sleep(0.2)
+
+    if count > before_count:
+        stray = _find_stray_track(conn, count, device_name)
+        click.echo(f"Error: Live put '{item_name}' on a NEW track instead of {where}"
+                   f" ({before_count} -> {count} tracks).", err=True)
+        if stray is not None:
+            click.echo(f"  Stray track: {stray} (empty). Remove it with: "
+                       f"ableton track delete {stray} --yes", err=True)
+        sys.exit(1)
+    if devices is not None and devices == before_devices:
+        if device_name in before_devices:
+            click.echo(f"Loaded '{item_name}' on {where} "
+                       f"(devices unchanged — it was already there): {devices}")
+            return
+        click.echo(f"Error: Live reported '{item_name}' loaded, but {where}'s devices"
+                   f" did not change: {devices}", err=True)
+        sys.exit(1)
+    shown = f": {devices}" if devices is not None else ""
+    click.echo(f"Loaded '{item_name}' on {where}{shown}")
+
+
 @cli.command("load")
 @click.argument("track_index", type=int)
 @click.argument("uri")
@@ -573,12 +647,7 @@ def browser_items(ctx: click.Context, path: str) -> None:
 def load_instrument(ctx: click.Context, track_index: int, uri: str) -> None:
     """Load an instrument or effect onto a track by URI."""
     conn = _get_conn(ctx)
-    result = conn.send_command("load_browser_item", {
-        "track_index": track_index,
-        "item_uri": uri,
-    })
-    if result.get("loaded"):
-        click.echo(f"Loaded '{result.get('item_name', uri)}' on track {track_index}")
+    _load_verified(conn, track_index, uri)
 
 
 # ── Device commands ─────────────────────────────────────────────────
@@ -662,14 +731,7 @@ def load_master(ctx: click.Context, uri: str) -> None:
     only — instruments are ignored by Live.
     """
     conn = _get_conn(ctx)
-    result = conn.send_command("load_browser_item", {
-        "track_index": -1,
-        "item_uri": uri,
-    })
-    if result.get("loaded"):
-        click.echo(f"Loaded '{result.get('item_name', uri)}' on master")
-    else:
-        click.echo(f"Failed to load: {uri}", err=True)
+    _load_verified(conn, -1, uri)
 
 
 @cli.command("load-slot")
