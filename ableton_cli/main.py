@@ -55,9 +55,9 @@ class _Cli(click.Group):
                 click.echo(
                     "Live is running an older AbletonMCP script. Copy "
                     "remote_scripts/AbletonMCP_Remote_Script/__init__.py over the "
-                    "installed one, then reload it in Live: Preferences > "
-                    "Link/Tempo/MIDI, set the AbletonMCP Control Surface to None "
-                    "and back. Restarting Live also works.", err=True)
+                    "installed one, delete its __pycache__, then quit and reopen "
+                    "Live. Toggling the Control Surface is not enough: Python "
+                    "keeps serving the old module.", err=True)
             sys.exit(1)
 
 
@@ -208,6 +208,44 @@ def track_volume(ctx: click.Context, index: int, db: float | None, value: float 
     click.echo(f"{result.get('name', index)}: {result.get('display')} (value {shown})")
     if result.get("clamped"):
         click.echo(f"Note: {db} dB is outside this fader's range; "
+                   f"it stopped at {result.get('display')}.", err=True)
+
+
+@track.command("pan", context_settings={"ignore_unknown_options": True})
+@click.argument("index", type=int)
+@click.argument("pan", type=click.IntRange(-50, 50))
+@click.pass_context
+def track_pan(ctx: click.Context, index: int, pan: int) -> None:
+    """Pan the track at INDEX: -50 (hard left) .. 50 (hard right), as Live shows it."""
+    conn = _get_conn(ctx)
+    result = conn.send_command("set_track_pan", {"track_index": index, "pan": pan / 50.0})
+    click.echo(f"{result.get('name', index)}: pan {result.get('display')}")
+
+
+@track.command("send")
+@click.argument("index", type=int)
+@click.argument("send")
+@click.option("--db", type=float, help="Send level in dB (what the knob displays)")
+@click.option("--value", type=float, help="Set the raw 0-1 parameter instead")
+@click.pass_context
+def track_send(ctx: click.Context, index: int, send: str,
+               db: float | None, value: float | None) -> None:
+    """Set the track at INDEX's SEND (A, B, ... or 0, 1, ...) to a return track."""
+    if (db is None) == (value is None):
+        click.echo("Error: pass exactly one of --db or --value", err=True)
+        sys.exit(1)
+    if send.isdigit():
+        send_index = int(send)
+    elif len(send) == 1 and send.isalpha():
+        send_index = ord(send.upper()) - ord("A")
+    else:
+        raise click.BadParameter("SEND must be a letter (A, B, ...) or an index")
+    conn = _get_conn(ctx)
+    result = conn.send_command("set_track_send", {"track_index": index, "send_index": send_index,
+                                                  "db": db, "value": value})
+    click.echo(f"{result.get('name', index)} -> {result.get('return')}: {result.get('display')}")
+    if result.get("clamped"):
+        click.echo(f"Note: {db} dB is outside this send's range; "
                    f"it stopped at {result.get('display')}.", err=True)
 
 
