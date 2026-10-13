@@ -211,7 +211,7 @@ def track_volume(ctx: click.Context, index: int, db: float | None, value: float 
                    f"it stopped at {result.get('display')}.", err=True)
 
 
-@track.command("pan")
+@track.command("pan", context_settings={"ignore_unknown_options": True})
 @click.argument("index", type=int)
 @click.argument("pan", type=click.IntRange(-50, 50))
 @click.pass_context
