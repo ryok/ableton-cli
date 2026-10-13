@@ -36,6 +36,7 @@ MODIFYING_COMMANDS = frozenset([
     "start_playback", "stop_playback", "load_browser_item",
     "load_browser_item_to_slot", "load_browser_item_to_arrangement",
     "set_track_mute", "set_track_solo", "set_track_volume",
+    "set_track_pan", "set_track_send",
     "delete_track", "duplicate_clip_to_arrangement",
     "set_device_parameter", "delete_device",
 ])
@@ -423,6 +424,13 @@ class AbletonMCP(ControlSurface):
                             result = self._set_track_volume(
                                 params.get("track_index", 0), params.get("value", None),
                                 params.get("db", None))
+                        elif command_type == "set_track_pan":
+                            result = self._set_track_pan(
+                                params.get("track_index", 0), params.get("pan", 0.0))
+                        elif command_type == "set_track_send":
+                            result = self._set_track_send(
+                                params.get("track_index", 0), params.get("send_index", 0),
+                                params.get("value", None), params.get("db", None))
                         elif command_type == "delete_track":
                             result = self._delete_track(params.get("track_index", 0))
                         elif command_type == "duplicate_clip_to_arrangement":
@@ -958,6 +966,48 @@ class AbletonMCP(ControlSurface):
                     "clamped": clamped}
         except Exception as e:
             self.log_message("Error setting track volume: " + str(e))
+            raise
+
+    def _set_track_pan(self, track_index, pan):
+        """Set track panning, -1 (hard left) .. 1 (hard right); 0 is centre."""
+        try:
+            track = self._track_at(track_index)
+            param = track.mixer_device.panning
+            param.value = max(param.min, min(param.max, float(pan)))
+            return {"name": track.name, "value": param.value,
+                    "display": param.str_for_value(param.value)}
+        except Exception as e:
+            self.log_message("Error setting track pan: " + str(e))
+            raise
+
+    def _set_track_send(self, track_index, send_index, value, db):
+        """Set a track's send to a return track, as raw 0-1 or in dB.
+
+        Sends are DeviceParameters on the same kind of non-linear curve as the
+        volume fader, so the dB path reuses the display bisection.
+        """
+        try:
+            if db is not None and value is not None:
+                raise Exception("Pass either db or value, not both")
+            track = self._track_at(track_index)
+            sends = track.mixer_device.sends
+            if send_index < 0 or send_index >= len(sends):
+                raise IndexError("Send index out of range (track has %d)" % len(sends))
+            param = sends[send_index]
+            clamped = False
+            if db is not None:
+                param.value, clamped = solve_for_db(
+                    float(db), param.min, param.max,
+                    lambda v: parse_display_db(param.str_for_value(v)))
+            elif value is not None:
+                param.value = max(param.min, min(param.max, float(value)))
+            returns = self._song.return_tracks
+            return {"name": track.name,
+                    "return": returns[send_index].name if send_index < len(returns) else None,
+                    "value": param.value, "display": param.str_for_value(param.value),
+                    "clamped": clamped}
+        except Exception as e:
+            self.log_message("Error setting track send: " + str(e))
             raise
 
     def _delete_track(self, track_index):

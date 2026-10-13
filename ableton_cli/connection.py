@@ -24,6 +24,7 @@ _FALLBACK_MODIFYING = frozenset({
     "start_playback", "stop_playback", "load_browser_item",
     "load_browser_item_to_slot", "load_browser_item_to_arrangement",
     "set_track_mute", "set_track_solo", "set_track_volume",
+    "set_track_pan", "set_track_send",
     "delete_track", "duplicate_clip_to_arrangement",
     "set_device_parameter", "delete_device",
 })
