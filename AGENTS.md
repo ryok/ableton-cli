@@ -131,6 +131,12 @@ Live's log, useful for confirming what actually loaded:
   `clip.warp_markers` but `remove_warp_marker` refuses it ("The shadow marker
   can't be deleted"), and Live leaves no rollback if a call fails midway – skip
   it, and make marker edits safe to re-run.
+- **`browser.load_item()` does not report where it loaded.** It loads into
+  whatever Live treats as the current insertion point and returns nothing; a
+  preset has landed on a brand-new track while the selected target kept its
+  old instrument. `load`/`load-master` therefore snapshot the track count and
+  the target's devices before and after, and exit 1 (naming any stray track)
+  when the load went elsewhere or changed nothing.
 - **`clip add-notes` via argv overflows the shell** at a few hundred notes. Use
   `--file`.
 
@@ -168,7 +174,8 @@ uv run --group dev pytest
 ```
 
 `tests/` covers the logic that does not need Live: the volume dB solver, the
-fader-display parser, and the consistency of the command table. The Remote
+fader-display parser, the consistency of the command table, and `load`'s
+landed-where check (against a fake connection). The Remote
 Script imports `_Framework` at module level, so the tests load it with that
 stubbed — which is only possible because those helpers were kept free of Live
 objects. Keep new pure logic that way.
