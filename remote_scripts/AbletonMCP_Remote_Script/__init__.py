@@ -952,6 +952,10 @@ class AbletonMCP(ControlSurface):
         try:
             if db is not None and value is not None:
                 raise Exception("Pass either db or value, not both")
+            # With neither, the reply would echo the current level as if a set
+            # had happened; a direct socket client could not tell the difference.
+            if db is None and value is None:
+                raise Exception("Pass db or value to set the level")
             track = self._track_at(track_index)
             param = track.mixer_device.volume
             clamped = False
@@ -989,6 +993,10 @@ class AbletonMCP(ControlSurface):
         try:
             if db is not None and value is not None:
                 raise Exception("Pass either db or value, not both")
+            # With neither, the reply would echo the current level as if a set
+            # had happened; a direct socket client could not tell the difference.
+            if db is None and value is None:
+                raise Exception("Pass db or value to set the level")
             track = self._track_at(track_index)
             sends = track.mixer_device.sends
             if send_index < 0 or send_index >= len(sends):
